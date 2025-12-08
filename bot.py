@@ -2,8 +2,8 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from datetime import datetime, timedelta
-import random
 import os
+import requests # <--- ДОДАНО: Для завантаження медіа
 
 # Налаштування логування
 logging.basicConfig(
@@ -16,9 +16,9 @@ user_status = {}
 checkin_history = []
 
 # --- КРИТИЧНО: ПОТРІБНІ ПРЯМІ URL-АДРЕСИ GIF/MP4 ---
-# Замініть ці URL на прямі посилання, які не є перенаправленням!
+# ВАЖЛИВО: Переконайтеся, що ці посилання є чистими.
 CHECKIN_GIFS = {
-    'gif_ci_1': "https://i.gifer.com/6sHG.gif", 
+    'gif_ci_1': "https://media.giphy.com/media/3ornka9rAaKRA2Rkac/giphy.gif", 
     'gif_ci_2': "https://media.giphy.com/media/g9582DNuQppxC/giphy.gif", 
     'gif_ci_3': "https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif", 
     'gif_ci_4': "https://media.giphy.com/media/xT0xeJpnrWC4XWblEk/giphy.gif", 
@@ -27,7 +27,7 @@ CHECKIN_GIFS = {
 CHECKOUT_GIFS = {
     'gif_co_1': "https://media.giphy.com/media/lD76yTC5zxZPG/giphy.gif",
     'gif_co_2': "https://media.giphy.com/media/3o6Zt6ML6BklcajjsA/giphy.gif",
-    'gif_co_3': "https://media.giphy.com/media/KB8C86UMgLDThpt4WT/giphy.gif",
+    'gif_co_3': "https://media.giphy.com/media/KB8C8C86UMgLDThpt4WT/giphy.gif",
     'gif_co_4': "https://media.giphy.com/media/l3q2Z6S6n38zjPswo/giphy.gif",
 }
 # ----------------------------------------------------
@@ -89,7 +89,7 @@ async def _execute_check(update: Update, context: ContextTypes.DEFAULT_TYPE, act
     # Редагуємо повідомлення про вибір GIF, щоб показати прогрес
     await query.edit_message_text(f"⏳ Обробка вашої відмітки...")
     
-    # Визначаємо GIF URL та формуємо повідомлення
+    # Визначаємо GIF URL
     gifs_map = CHECKIN_GIFS if action == 'checkin' else CHECKOUT_GIFS
     gif_url = gifs_map.get(gif_key)
     
@@ -103,10 +103,6 @@ async def _execute_check(update: Update, context: ContextTypes.DEFAULT_TYPE, act
             'checkin_dt': current_time, 
             'username': username
         }
-        
-        checkin_history.append({
-            'user': username, 'action': 'check-in', 'time': time_str, 'date': current_time.strftime("%d.%m.%Y")
-        })
         
         message = f"✅ {username} почав робочий день!\n⏰ Час: {time_str}\n\n💪 Продуктивної роботи!"
         
@@ -125,26 +121,45 @@ async def _execute_check(update: Update, context: ContextTypes.DEFAULT_TYPE, act
         
         user_status[user_id]['checked_in'] = False
         
-        checkin_history.append({
-            'user': username, 'action': 'check-out', 'time': time_str, 'date': current_time.strftime("%d.%m.%Y")
-        })
-        
         message = (f"🚪 {username} закінчив робочий день!\n"
                    f"⏰ Час виходу: {time_str}\n"
                    f"⏱ Відпрацьовано: {int(hours)}г {int(minutes)}хв\n\n"
                    f"👏 Чудова робота!")
 
-    # --- ОНОВЛЕНА ЛОГІКА ВІДПРАВКИ З ОБРОБКОЮ ПОМИЛОК ---
-    logging.info(f"Спроба відправити GIF URL: {gif_url}")
+    # Логуємо дію (незалежно від success)
+    checkin_history.append({
+        'user': username, 
+        'action': 'check-in' if action == 'checkin' else 'check-out', 
+        'time': time_str, 
+        'date': current_time.strftime("%d.%m.%Y")
+    })
+
+    # --- ОНОВЛЕНА ЛОГІКА ВІДПРАВКИ ЧЕРЕЗ ЗАВАНТАЖЕННЯ (REQUESTS) ---
+    logging.info(f"Спроба ЗАВАНТАЖИТИ і надіслати GIF з URL: {gif_url}")
     try:
-        # 1. Надсилаємо GIF до чату (використовуючи effective_chat для надійності)
-        await update.effective_chat.send_animation(animation=gif_url, caption=message)
+        # 1. Завантажуємо GIF/MP4 контент з URL (таймаут 30 секунд)
+        response = requests.get(gif_url, timeout=30)
+        response.raise_for_status() 
         
+        # 2. Надсилаємо контент як файл (байт-масив)
+        await update.effective_chat.send_animation(
+            animation=response.content, 
+            caption=message
+        )
+        
+    except requests.exceptions.Timeout:
+        error_message = "❌ Помилка таймауту мережі Render при завантаженні GIF. Спробуйте ще раз!"
+        logging.error(error_message)
+        await update.effective_chat.send_message(text=f"{message}\n\n{error_message}")
+
+    except requests.exceptions.HTTPError as http_err:
+        error_message = f"❌ Помилка HTTP при завантаженні GIF. URL не знайдено або відмовлено у доступі. ({http_err.response.status_code})"
+        logging.error(f"HTTP Помилка: {http_err}")
+        await update.effective_chat.send_message(text=f"{message}\n\n{error_message}")
+
     except Exception as e:
-        error_message = f"❌ Упс! Не вдалося надіслати GIF. Це може бути помилка URL або таймаут. Помилка: {e}"
-        logging.error(f"Помилка при відправці GIF для {username}: {e}")
-        
-        # 2. Якщо GIF не відправляється, надсилаємо лише текст з попередженням
+        error_message = f"❌ Критична помилка при відправці GIF. Помилка: {type(e).__name__}: {e}"
+        logging.error(f"Критична помилка: {e}")
         await update.effective_chat.send_message(text=f"{message}\n\n{error_message}")
         
     # 3. Редагуємо повідомлення "Обробка..." на нейтральне
@@ -267,7 +282,6 @@ def main():
     TOKEN = os.getenv('BOT_TOKEN')
 
     if not TOKEN:
-        # Для локального тестування можна замінити на ваш токен, але для Render краще використовувати змінні середовища
         raise ValueError("BOT_TOKEN не знайдено. Переконайтеся, що ви встановили змінну середовища BOT_TOKEN.")
 
     application = Application.builder().token(TOKEN).build()
