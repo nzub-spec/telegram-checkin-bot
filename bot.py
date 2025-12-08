@@ -1,36 +1,19 @@
 import logging
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
-
 from datetime import datetime
-
 import random
-
 import os
 
-
-
 # Налаштування логування
-
 logging.basicConfig(
-
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-
     level=logging.INFO
-
 )
 
-
-
 # Зберігання даних користувачів (у продакшені використовуй БД)
-
 user_status = {}
-
 checkin_history = []
-
-
 
 # URL картинок та гіфок для чекіну
 
