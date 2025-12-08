@@ -200,7 +200,7 @@ def main():
     """Запуск бота"""
     # Вставте свій токен від @BotFather
     import os
-TOKEN = os.getenv('BOT_TOKEN')
+    TOKEN = os.getenv('BOT_TOKEN')
     
     application = Application.builder().token(TOKEN).build()
     
