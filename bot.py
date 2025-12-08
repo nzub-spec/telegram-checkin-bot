@@ -3,6 +3,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from datetime import datetime
 import random
+import os
 
 # Налаштування логування
 logging.basicConfig(
@@ -198,7 +199,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     """Запуск бота"""
     # Вставте свій токен від @BotFather
-    TOKEN = "YOUR_BOT_TOKEN_HERE"
+    import os
+TOKEN = os.getenv('BOT_TOKEN')
     
     application = Application.builder().token(TOKEN).build()
     
