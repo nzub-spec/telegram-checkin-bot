@@ -18,7 +18,7 @@ checkin_history = []
 # --- КРИТИЧНО: ПОТРІБНІ ПРЯМІ URL-АДРЕСИ GIF/MP4 ---
 # Замініть ці URL на прямі посилання, які не є перенаправленням!
 CHECKIN_GIFS = {
-    'gif_ci_1': "https://media.giphy.com/media/3ornka9rAaKRA2Rkac/giphy.gif", 
+    'gif_ci_1': "https://i.gifer.com/6sHG.gif", 
     'gif_ci_2': "https://media.giphy.com/media/g9582DNuQppxC/giphy.gif", 
     'gif_ci_3': "https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif", 
     'gif_ci_4': "https://media.giphy.com/media/xT0xeJpnrWC4XWblEk/giphy.gif", 
