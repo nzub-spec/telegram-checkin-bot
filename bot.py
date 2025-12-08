@@ -15,21 +15,22 @@ logging.basicConfig(
 user_status = {}
 checkin_history = []
 
-# --- ОНОВЛЕНІ КОНСТАНТИ ---
+# --- КРИТИЧНО: ПОТРІБНІ ПРЯМІ URL-АДРЕСИ GIF/MP4 ---
+# Замініть ці URL на прямі посилання, які не є перенаправленням!
 CHECKIN_GIFS = {
-    'gif_ci_1': "https://i.giphy.com/media/3ornka9rAaKRA2Rkac/giphy.gif", # Продуктивний старт
-    'gif_ci_2': "https://i.giphy.com/media/g9582DNuQppxC/giphy.gif", # Готовність
-    'gif_ci_3': "https://i.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif", # Кава-пауза
-    'gif_ci_4': "https://i.giphy.com/media/xT0xeJpnrWC4XWblEk/giphy.gif", # Робочий стіл
+    'gif_ci_1': "https://media.giphy.com/media/3ornka9rAaKRA2Rkac/giphy.gif", 
+    'gif_ci_2': "https://media.giphy.com/media/g9582DNuQppxC/giphy.gif", 
+    'gif_ci_3': "https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif", 
+    'gif_ci_4': "https://media.giphy.com/media/xT0xeJpnrWC4XWblEk/giphy.gif", 
 }
 
 CHECKOUT_GIFS = {
-    'gif_co_1': "https://i.giphy.com/media/lD76yTC5zxZPG/giphy.gif",
-    'gif_co_2': "https://i.giphy.com/media/3o6Zt6ML6BklcajjsA/giphy.gif",
-    'gif_co_3': "https://i.giphy.com/media/KB8C86UMgLDThpt4WT/giphy.gif",
-    'gif_co_4': "https://i.giphy.com/media/l3q2Z6S6n38zjPswo/giphy.gif",
+    'gif_co_1': "https://media.giphy.com/media/lD76yTC5zxZPG/giphy.gif",
+    'gif_co_2': "https://media.giphy.com/media/3o6Zt6ML6BklcajjsA/giphy.gif",
+    'gif_co_3': "https://media.giphy.com/media/KB8C86UMgLDThpt4WT/giphy.gif",
+    'gif_co_4': "https://media.giphy.com/media/l3q2Z6S6n38zjPswo/giphy.gif",
 }
-# -------------------------
+# ----------------------------------------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /start"""
@@ -92,6 +93,8 @@ async def _execute_check(update: Update, context: ContextTypes.DEFAULT_TYPE, act
     gifs_map = CHECKIN_GIFS if action == 'checkin' else CHECKOUT_GIFS
     gif_url = gifs_map.get(gif_key)
     
+    message = "" # Ініціалізація змінної message
+    
     if action == 'checkin':
         # Логіка Check-in
         user_status[user_id] = {
@@ -132,6 +135,7 @@ async def _execute_check(update: Update, context: ContextTypes.DEFAULT_TYPE, act
                    f"👏 Чудова робота!")
 
     # --- ОНОВЛЕНА ЛОГІКА ВІДПРАВКИ З ОБРОБКОЮ ПОМИЛОК ---
+    logging.info(f"Спроба відправити GIF URL: {gif_url}")
     try:
         # 1. Надсилаємо GIF до чату (використовуючи effective_chat для надійності)
         await update.effective_chat.send_animation(animation=gif_url, caption=message)
@@ -143,9 +147,8 @@ async def _execute_check(update: Update, context: ContextTypes.DEFAULT_TYPE, act
         # 2. Якщо GIF не відправляється, надсилаємо лише текст з попередженням
         await update.effective_chat.send_message(text=f"{message}\n\n{error_message}")
         
-    # 3. Редагуємо повідомлення "Обробка..." на нейтральне або видаляємо, якщо потрібно.
-    # Залишимо нейтральне повідомлення.
-    await query.edit_message_text(f"👋 Відмітка завершена.")
+    # 3. Редагуємо повідомлення "Обробка..." на нейтральне
+    await query.edit_message_text(f"👋 Відмітка завершена. Звіт вище.")
 
 
 async def checkin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -264,6 +267,7 @@ def main():
     TOKEN = os.getenv('BOT_TOKEN')
 
     if not TOKEN:
+        # Для локального тестування можна замінити на ваш токен, але для Render краще використовувати змінні середовища
         raise ValueError("BOT_TOKEN не знайдено. Переконайтеся, що ви встановили змінну середовища BOT_TOKEN.")
 
     application = Application.builder().token(TOKEN).build()
