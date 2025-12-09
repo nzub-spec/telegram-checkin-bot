@@ -28,8 +28,8 @@ DEFAULT_CHECKIN = [
 DEFAULT_CHECKOUT = [
     "https://media.giphy.com/media/lD76yTC5zxZPG/giphy.gif",
     "https://media.giphy.com/media/3o6Zt6ML6BklcajjsA/giphy.gif",
-    "https://media.giphy.com/media/KB8C86UMgLDThpt4WT/giphy.gif",
-    "https://media.giphy.com/media/l3q2Z6S6n38zjPswo/giphy.gif",
+    "До завтра",
+    "До пʼятниці",
 ]
 
 # Глобальне сховище
