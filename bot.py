@@ -133,7 +133,8 @@ async def show_workload(update: Update):
     keyboard = [
         [InlineKeyboardButton("🟢 Потрібні задачі", callback_data='work_🟢')],
         [InlineKeyboardButton("🟡 Середня завантаженість", callback_data='work_🟡')],
-        [InlineKeyboardButton("🔴 Завантаженість до пенсії", callback_data='work_🔴')]
+        [InlineKeyboardButton("🔴 Завантаженість до пенсії", callback_data='work_🔴')],
+        [InlineKeyboardButton("➡️ Пропустити", callback_data='work_skip')]
     ]
     await update.callback_query.answer()
     # Видаляємо меню
@@ -143,7 +144,7 @@ async def show_workload(update: Update):
         pass
     # Відправляємо нове
     await update.callback_query.message.reply_text(
-        '📊 Обери рівень завантаження:',
+        '📊 Обери рівень завантаження або пропусти:',
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -170,12 +171,16 @@ async def checkin(update: Update, workload: str):
     except:
         pass
     
-    # Відправляємо підтвердження з завантаженістю
-    await update.callback_query.message.reply_text(
-        f"✅ {username} почав робочий день!\n"
-        f"{workload} {WORKLOAD[workload]}\n\n"
-        f"💪 Продуктивної роботи!"
-    )
+    # Відправляємо підтвердження
+    if workload:
+        msg = (f"✅ {username} почав робочий день!\n"
+               f"{workload} {WORKLOAD[workload]}\n\n"
+               f"💪 Продуктивної роботи!")
+    else:
+        msg = (f"✅ {username} почав робочий день!\n\n"
+               f"💪 Продуктивної роботи!")
+    
+    await update.callback_query.message.reply_text(msg)
 
 async def checkout(update: Update):
     """Check-out (через кнопку)"""
@@ -240,8 +245,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == 'checkin':
         await show_workload(update)
     elif data.startswith('work_'):
-        workload = data.split('_')[1]
-        await checkin(update, workload)
+        if data == 'work_skip':
+            # Чекін без завантаження
+            await checkin(update, None)
+        else:
+            # Чекін з завантаженням
+            workload = data.split('_')[1]
+            await checkin(update, workload)
     elif data == 'checkout':
         await checkout(update)
     elif data == 'team':
