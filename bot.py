@@ -37,7 +37,7 @@ DEFAULT_CHECKIN = [
 
 DEFAULT_CHECKOUT = [
     {"type": "text", "content": "До завтра 👋"},
-    {"type": "text", "content": "До понеділка 🎉"},
+    {"type": "text", "content": "До пʼятниці 🎉"},
     {"type": "text", "content": "Гарного вечора! 🌙"},
 ]
 
@@ -49,11 +49,23 @@ user_media: Dict = {}
 if FLASK_AVAILABLE:
     app = Flask(__name__)
     
+    # Глобальна змінна для додатку
+    telegram_app = None
+    
     @app.route('/')
     def home(): return "🤖 Bot running!"
     
     @app.route('/health')
     def health(): return "OK", 200
+    
+    @app.route(f'/webhook/{os.getenv("BOT_TOKEN", "")}', methods=['POST'])
+    async def webhook():
+        """Обробка webhook від Telegram"""
+        from flask import request
+        if telegram_app:
+            update = Update.de_json(request.get_json(force=True), telegram_app.bot)
+            await telegram_app.process_update(update)
+        return "OK"
     
     def run_flask():
         app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
@@ -73,6 +85,7 @@ if FLASK_AVAILABLE:
 else:
     def run_flask(): pass
     def keep_alive(): pass
+    telegram_app = None
 
 def get_media(user_id: int) -> Dict:
     """Отримати медіа користувача"""
@@ -426,7 +439,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Запуск"""
+    global telegram_app
+    
     TOKEN = os.getenv('BOT_TOKEN')
+    WEBHOOK_URL = os.getenv('RENDER_EXTERNAL_URL')
+    USE_WEBHOOK = os.getenv('USE_WEBHOOK', 'false').lower() == 'true'
+    
     if not TOKEN:
         logger.error("BOT_TOKEN не знайдено!")
         return
@@ -436,7 +454,8 @@ def main():
         Thread(target=keep_alive, daemon=True).start()
         logger.info("Flask + Keep-alive запущено!")
     
-    app = Application.builder().token(TOKEN).build()
+    application = Application.builder().token(TOKEN).build()
+    telegram_app = application
     
     # Conversation handler
     conv = ConversationHandler(
@@ -459,15 +478,27 @@ def main():
         fallbacks=[CommandHandler("cancel", lambda u, c: (u.message.reply_text("❌ Скасовано"), ConversationHandler.END)[1])],
     )
     
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("status", status))
-    app.add_handler(CommandHandler("team", team_status))
-    app.add_handler(CommandHandler("settings", settings_menu))
-    app.add_handler(conv)
-    app.add_handler(CallbackQueryHandler(button_callback))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("team", team_status))
+    application.add_handler(CommandHandler("settings", settings_menu))
+    application.add_handler(conv)
+    application.add_handler(CallbackQueryHandler(button_callback))
     
     logger.info("🤖 Бот запущено!")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    
+    # Використовуємо polling (простіше для Render)
+    # Спочатку видаляємо webhook якщо він був
+    import asyncio
+    asyncio.run(application.bot.delete_webhook(drop_pending_updates=True))
+    logger.info("Webhook видалено, використовую polling")
+    
+    # Запускаємо polling
+    application.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,
+        close_loop=False
+    )
 
 if __name__ == '__main__':
     main()
