@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # Константи
 CHOOSING_CHECKIN_MEDIA, CHOOSING_CHECKOUT_MEDIA = range(2)
 DEFAULT_CHECKIN = [
-    "https://media.giphy.com/media/3ornka9rAaKRA2Rkac/giphy.gif",
+    "https://www.youtube.com/watch?v=BwzYkApdxCU%D0%BC",
     "https://media.giphy.com/media/g9582DNuQppxC/giphy.gif",
     "https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif",
     "https://media.giphy.com/media/xT0xeJpnrWC4XWblEk/giphy.gif",
