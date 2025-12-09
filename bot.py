@@ -4,11 +4,13 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters, ConversationHandler
 from datetime import datetime
 from threading import Thread
-from typing import Dict, List
+from typing import Dict
+import random
 
 # Flask для Render
 try:
     from flask import Flask
+    import requests
     FLASK_AVAILABLE = True
 except ImportError:
     FLASK_AVAILABLE = False
@@ -19,209 +21,184 @@ logger = logging.getLogger(__name__)
 
 # Константи
 CHOOSING_CHECKIN_MEDIA, CHOOSING_CHECKOUT_MEDIA = range(2)
+
+# Рівні завантаження
+WORKLOAD_LEVELS = {
+    '🟢': 'Потрібні задачі',
+    '🟡': 'Середня завантаженість',
+    '🔴': 'Завантаженість до пенсії'
+}
+
 DEFAULT_CHECKIN = [
-    "https://www.youtube.com/watch?v=BwzYkApdxCU%D0%BC",
+    {"type": "animation", "content": "https://media.giphy.com/media/BwzYkApdxCU/giphy.gif"},
+    {"type": "text", "content": "Доброго ранку! ☀️"},
+    {"type": "text", "content": "Готовий до роботи! 💪"},
 ]
+
 DEFAULT_CHECKOUT = [
-    "До завтра",
-    "До пʼятниці",
+    {"type": "text", "content": "До завтра 👋"},
+    {"type": "text", "content": "До пʼятниці 🎉"},
+    {"type": "text", "content": "Гарного вечора! 🌙"},
 ]
 
 # Глобальне сховище
 user_status: Dict = {}
 user_media: Dict = {}
-user_selected_media: Dict = {}
 
 # Flask setup
 if FLASK_AVAILABLE:
     app = Flask(__name__)
+    
     @app.route('/')
     def home(): return "🤖 Bot running!"
+    
     @app.route('/health')
     def health(): return "OK", 200
+    
     def run_flask():
         app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
+    
+    def keep_alive():
+        """Пінг себе кожні 14 хвилин"""
+        import time
+        url = os.environ.get('RENDER_EXTERNAL_URL')
+        if url:
+            while True:
+                time.sleep(840)
+                try:
+                    requests.get(f"{url}/health", timeout=5)
+                    logger.info("🏓 Keep-alive ping")
+                except Exception as e:
+                    logger.error(f"Keep-alive error: {e}")
 else:
     def run_flask(): pass
+    def keep_alive(): pass
 
-def get_media(user_id: int) -> Dict[str, List[str]]:
+def get_media(user_id: int) -> Dict:
     """Отримати медіа користувача"""
     if user_id not in user_media:
         user_media[user_id] = {'checkin': DEFAULT_CHECKIN.copy(), 'checkout': DEFAULT_CHECKOUT.copy()}
     return user_media[user_id]
 
-def create_keyboard(buttons: List[List[tuple]]) -> InlineKeyboardMarkup:
-    """Створити клавіатуру з кнопок"""
+def create_keyboard(buttons) -> InlineKeyboardMarkup:
+    """Створити клавіатуру"""
     return InlineKeyboardMarkup([[InlineKeyboardButton(text, callback_data=data) for text, data in row] for row in buttons])
-
-async def send_or_edit(update: Update, text: str, keyboard: InlineKeyboardMarkup = None):
-    """Відправити або редагувати повідомлення"""
-    if update.callback_query:
-        await update.callback_query.answer()
-        if keyboard:
-            await update.callback_query.message.edit_text(text, reply_markup=keyboard)
-        else:
-            await update.callback_query.message.reply_text(text)
-    else:
-        await update.message.reply_text(text, reply_markup=keyboard)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Головне меню"""
     keyboard = create_keyboard([
-        [("✅ Check-in", 'choose_checkin'), ("🚪 Check-out", 'choose_checkout')],
-        [("📊 Мій статус", 'status')],
+        [("✅ Check-in", 'checkin'), ("🚪 Check-out", 'checkout')],
+        [("📊 Мій статус", 'status'), ("👥 Команда", 'team')],
         [("🎨 Налаштувати медіа", 'settings')]
     ])
     await update.message.reply_text(
         '👋 Привіт! Бот для відмітки робочого часу.\n\n'
-        '📝 Команди:\n/checkin /checkout /status /team\n'
-        '/settings /add_checkin_media /add_checkout_media /reset_media',
+        '📝 Команди:\n'
+        '/checkin - почати день\n'
+        '/checkout - закінчити день\n'
+        '/status - мій статус\n'
+        '/team - статус команди\n'
+        '/settings - налаштування',
         reply_markup=keyboard
     )
 
-async def show_media_selection(update: Update, user_id: int, media_type: str):
-    """Показати вибір медіа"""
-    media = get_media(user_id)[media_type]
-    buttons = [[(f"🎬 Гіфка #{i+1}", f'{media_type}_media_{i}')] for i in range(min(10, len(media)))]
-    buttons.append([("⬅️ Назад", 'back_to_main')])
-    
-    await send_or_edit(
-        update,
-        f"🎬 Обери гіфку для {media_type}:\n\nВсього: {len(media)} гіфок",
-        create_keyboard(buttons)
-    )
-
-async def preview_media(update: Update, user_id: int, media_type: str, index: int):
-    """Показати превʼю та підтвердження"""
-    query = update.callback_query
-    username = update.effective_user.first_name
-    
-    # Перевірки
-    if media_type == 'checkin' and user_id in user_status and user_status[user_id].get('checked_in'):
-        await query.answer()
-        await query.message.reply_text(f"❗ {username}, ти вже зачекінився!")
-        return
-    elif media_type == 'checkout' and (user_id not in user_status or not user_status[user_id].get('checked_in')):
-        await query.answer()
-        await query.message.reply_text(f"❗ {username}, спочатку зробіть check-in!")
-        return
-    
-    media = get_media(user_id)[media_type][index]
-    user_selected_media[user_id] = {media_type: media}
-    
+async def show_workload_selection(update: Update, action: str):
+    """Показати вибір рівня завантаження"""
     keyboard = create_keyboard([
-        [(f"✅ Підтвердити", f'confirm_{media_type}')],
-        [("🔄 Обрати іншу", f'choose_{media_type}')],
-        [("❌ Скасувати", 'back_to_main')]
-    ])
-    
-    await query.answer()
-    try:
-        await query.message.reply_animation(
-            animation=media,
-            caption=f"🎬 Превʼю для {media_type}\n\nПідтверджуєш?",
-            reply_markup=keyboard
-        )
-    except:
-        await query.message.reply_text(f"🎬 Гіфка вибрана!\n\nПідтверджуєш?", reply_markup=keyboard)
-
-async def confirm_action(update: Update, user_id: int, action: str):
-    """Підтвердити check-in/out"""
-    query = update.callback_query
-    username = update.effective_user.first_name
-    now = datetime.now().strftime("%H:%M:%S")
-    
-    if action == 'checkin':
-        if user_id in user_status and user_status[user_id].get('checked_in'):
-            await query.answer("Вже зачекінений!")
-            return
-        
-        user_status[user_id] = {'checked_in': True, 'checkin_time': now, 'username': username}
-        msg = f"✅ {username} почав роботу!\n⏰ {now}\n\n💪 Продуктивної роботи!"
-    
-    else:  # checkout
-        if user_id not in user_status or not user_status[user_id].get('checked_in'):
-            await query.answer("Спочатку check-in!")
-            return
-        
-        checkin = datetime.strptime(user_status[user_id]['checkin_time'], "%H:%M:%S")
-        checkout = datetime.strptime(now, "%H:%M:%S")
-        duration = checkout - checkin
-        h, rem = divmod(duration.seconds, 3600)
-        m, _ = divmod(rem, 60)
-        
-        user_status[user_id]['checked_in'] = False
-        msg = f"🚪 {username} закінчив роботу!\n⏰ {now}\n⏱ Відпрацьовано: {h}г {m}хв\n\n👏 Чудова робота!"
-    
-    media = user_selected_media.get(user_id, {}).get(action)
-    await query.answer(f"✅ {action.capitalize()} підтверджено!")
-    
-    try:
-        if media:
-            await query.message.reply_animation(animation=media, caption=msg)
-        else:
-            await query.message.reply_text(msg)
-    except:
-        await query.message.reply_text(msg)
-
-async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Меню налаштувань"""
-    user_id = update.effective_user.id
-    media = get_media(user_id)
-    
-    keyboard = create_keyboard([
-        [("➕ Додати check-in", 'add_checkin')],
-        [("➕ Додати check-out", 'add_checkout')],
-        [("📋 Переглянути медіа", 'view_media')],
-        [("🔄 Скинути", 'reset_media')],
+        [("🟢 Потрібні задачі", f'{action}_workload_🟢')],
+        [("🟡 Середня завантаженість", f'{action}_workload_🟡')],
+        [("🔴 Завантаженість до пенсії", f'{action}_workload_🔴')],
         [("⬅️ Назад", 'back_to_main')]
     ])
     
-    await send_or_edit(
-        update,
-        f"🎨 Налаштування медіа\n\n"
-        f"✅ Check-in: {len(media['checkin'])} файлів\n"
-        f"🚪 Check-out: {len(media['checkout'])} файлів",
-        keyboard
-    )
-
-async def view_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Переглянути медіа"""
-    media = get_media(update.effective_user.id)
-    msg = "📋 Твої медіа:\n\n✅ Check-in:\n"
-    msg += "\n".join(f"{i+1}. {url[:50]}..." for i, url in enumerate(media['checkin']))
-    msg += "\n\n🚪 Check-out:\n"
-    msg += "\n".join(f"{i+1}. {url[:50]}..." for i, url in enumerate(media['checkout']))
+    msg = f"📊 Обери рівень завантаження для {action}:"
     
-    await update.callback_query.answer()
-    await update.callback_query.message.reply_text(msg)
-
-async def add_media_start(update: Update, media_type: str):
-    """Початок додавання медіа"""
-    msg = (f"📸 Додавання {media_type} медіа\n\n"
-           "Надішли URL, фото або гіфку\n"
-           "/done - завершити, /cancel - скасувати")
-    await send_or_edit(update, msg)
-    return CHOOSING_CHECKIN_MEDIA if media_type == 'checkin' else CHOOSING_CHECKOUT_MEDIA
-
-async def receive_media(update: Update, media_type: str):
-    """Отримати медіа від користувача"""
-    user_id = update.effective_user.id
-    media = get_media(user_id)[media_type]
-    
-    if update.message.text and update.message.text.startswith('http'):
-        media.append(update.message.text.strip())
-        await update.message.reply_text(f"✅ Додано! Всього: {len(media)}\nНадішли ще або /done")
-    elif update.message.photo:
-        media.append(update.message.photo[-1].file_id)
-        await update.message.reply_text(f"✅ Фото додано! Всього: {len(media)}\nНадішли ще або /done")
-    elif update.message.animation:
-        media.append(update.message.animation.file_id)
-        await update.message.reply_text(f"✅ Гіфка додана! Всього: {len(media)}\nНадішли ще або /done")
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.edit_text(msg, reply_markup=keyboard)
     else:
-        await update.message.reply_text("❌ Надішли URL, фото або гіфку")
+        await update.message.reply_text(msg, reply_markup=keyboard)
+
+async def send_media(query, media_item: dict, caption: str):
+    """Відправити медіа будь-якого типу"""
+    try:
+        media_type = media_item.get("type", "text")
+        content = media_item.get("content", "")
+        
+        if media_type == "text":
+            # Якщо це текст - додаємо до caption
+            full_message = f"{caption}\n\n💬 {content}"
+            await query.message.reply_text(full_message)
+        elif media_type == "animation":
+            # Гіфка
+            await query.message.reply_animation(animation=content, caption=caption)
+        elif media_type == "photo":
+            # Фото
+            await query.message.reply_photo(photo=content, caption=caption)
+        elif media_type == "video":
+            # Відео
+            await query.message.reply_video(video=content, caption=caption)
+        else:
+            # Якщо невідомий тип - просто текст
+            await query.message.reply_text(caption)
+    except Exception as e:
+        logger.error(f"Помилка відправки медіа: {e}")
+        # Якщо не вдалося відправити медіа - відправляємо текст
+        await query.message.reply_text(caption)
+    """Check-in з рівнем завантаження"""
+    query = update.callback_query
     
-    return CHOOSING_CHECKIN_MEDIA if media_type == 'checkin' else CHOOSING_CHECKOUT_MEDIA
+    if user_id in user_status and user_status[user_id].get('checked_in'):
+        await query.answer("Вже зачекінений!")
+        await query.message.reply_text(f"❗ {username}, ти вже на роботі!")
+        return
+    
+    user_status[user_id] = {
+        'checked_in': True,
+        'username': username,
+        'workload': workload,
+        'workload_text': WORKLOAD_LEVELS[workload]
+    }
+    
+    media = get_media(user_id)['checkin']
+    selected = random.choice(media)
+    
+    msg = (f"✅ {username} почав робочий день!\n"
+           f"{workload} Рівень: {WORKLOAD_LEVELS[workload]}\n\n"
+           f"💪 Продуктивної роботи!")
+    
+    await query.answer(f"✅ Check-in: {WORKLOAD_LEVELS[workload]}")
+    
+    try:
+        await query.message.reply_animation(animation=selected, caption=msg)
+    except:
+        await query.message.reply_text(msg)
+
+async def checkout(update: Update, user_id: int, username: str, workload: str):
+    """Check-out з рівнем завантаження"""
+    query = update.callback_query
+    
+    if user_id not in user_status or not user_status[user_id].get('checked_in'):
+        await query.answer("Спочатку check-in!")
+        await query.message.reply_text(f"❗ {username}, спочатку зробіть check-in!")
+        return
+    
+    checkin_workload = user_status[user_id].get('workload', '🟡')
+    user_status[user_id]['checked_in'] = False
+    user_status[user_id]['checkout_workload'] = workload
+    user_status[user_id]['checkout_workload_text'] = WORKLOAD_LEVELS[workload]
+    
+    media = get_media(user_id)['checkout']
+    selected = random.choice(media)
+    
+    msg = (f"🚪 {username} закінчив робочий день!\n\n"
+           f"📊 Завантаженість:\n"
+           f"  Початок дня: {checkin_workload} {WORKLOAD_LEVELS[checkin_workload]}\n"
+           f"  Кінець дня: {workload} {WORKLOAD_LEVELS[workload]}\n\n"
+           f"👏 Чудова робота!")
+    
+    await query.answer(f"✅ Check-out: {WORKLOAD_LEVELS[workload]}")
+    await send_media(query, selected, msg)
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Статус користувача"""
@@ -231,51 +208,201 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in user_status or not user_status[user_id].get('checked_in'):
         msg = f"📊 {username}, ти не на роботі\n\nВикористай /checkin"
     else:
-        checkin = datetime.strptime(user_status[user_id]['checkin_time'], "%H:%M:%S")
-        now = datetime.now()
-        checkin = checkin.replace(year=now.year, month=now.month, day=now.day)
-        duration = now - checkin
-        h, rem = divmod(duration.seconds, 3600)
-        m, _ = divmod(rem, 60)
-        msg = f"📊 {username}\n\n✅ На роботі\n⏰ З {user_status[user_id]['checkin_time']}\n⏱ Працюєш: {h}г {m}хв"
+        workload = user_status[user_id].get('workload', '🟡')
+        workload_text = user_status[user_id].get('workload_text', 'Середня')
+        msg = (f"📊 Статус: {username}\n\n"
+               f"✅ На роботі\n"
+               f"{workload} Завантаженість: {workload_text}")
     
-    await send_or_edit(update, msg)
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.reply_text(msg)
+    else:
+        await update.message.reply_text(msg)
 
 async def team_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Статус команди"""
     if not user_status:
-        await update.message.reply_text("📊 Немає даних")
-        return
+        msg = "📊 Немає даних про команду"
+    else:
+        online = []
+        offline = []
+        
+        for uid, data in user_status.items():
+            name = data.get('username', 'User')
+            if data.get('checked_in'):
+                workload = data.get('workload', '🟡')
+                workload_text = data.get('workload_text', 'Середня')
+                online.append(f"{workload} {name} - {workload_text}")
+            else:
+                offline.append(f"⭕ {name}")
+        
+        msg = "👥 Статус команди:\n\n"
+        if online:
+            msg += "🟢 На роботі:\n" + "\n".join(online) + "\n\n"
+        if offline:
+            msg += "🔴 Не на роботі:\n" + "\n".join(offline)
     
-    online = [f"✅ {d['username']} (з {d['checkin_time']})" for d in user_status.values() if d.get('checked_in')]
-    offline = [f"⭕ {d['username']}" for d in user_status.values() if not d.get('checked_in')]
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.reply_text(msg)
+    else:
+        await update.message.reply_text(msg)
+
+async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Меню налаштувань"""
+    user_id = update.effective_user.id
+    media = get_media(user_id)
     
-    msg = "👥 Статус команди:\n\n"
-    if online: msg += "🟢 На роботі:\n" + "\n".join(online) + "\n\n"
-    if offline: msg += "🔴 Не на роботі:\n" + "\n".join(offline)
+    keyboard = create_keyboard([
+        [("➕ Додати check-in медіа", 'add_checkin')],
+        [("➕ Додати check-out медіа", 'add_checkout')],
+        [("📋 Переглянути медіа", 'view_media')],
+        [("🔄 Скинути до стандартних", 'reset_media')],
+        [("⬅️ Назад", 'back_to_main')]
+    ])
     
-    await update.message.reply_text(msg)
+    msg = (f"🎨 Налаштування медіа\n\n"
+           f"✅ Check-in: {len(media['checkin'])} файлів\n"
+           f"🚪 Check-out: {len(media['checkout'])} файлів")
+    
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.edit_text(msg, reply_markup=keyboard)
+    else:
+        await update.message.reply_text(msg, reply_markup=keyboard)
+
+async def view_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Переглянути медіа"""
+    media = get_media(update.effective_user.id)
+    
+    type_emoji = {
+        "text": "💬",
+        "photo": "🖼",
+        "animation": "🎬",
+        "video": "🎥"
+    }
+    
+    msg = "📋 Твої медіа:\n\n✅ Check-in:\n"
+    for i, item in enumerate(media['checkin'], 1):
+        emoji = type_emoji.get(item.get("type", "text"), "📎")
+        content = item.get("content", "")
+        preview = content[:40] + "..." if len(content) > 40 else content
+        msg += f"{i}. {emoji} {preview}\n"
+    
+    msg += "\n🚪 Check-out:\n"
+    for i, item in enumerate(media['checkout'], 1):
+        emoji = type_emoji.get(item.get("type", "text"), "📎")
+        content = item.get("content", "")
+        preview = content[:40] + "..." if len(content) > 40 else content
+        msg += f"{i}. {emoji} {preview}\n"
+    
+    await update.callback_query.answer()
+    await update.callback_query.message.reply_text(msg)
+
+async def add_media_start(update: Update, media_type: str):
+    """Початок додавання медіа"""
+    msg = (f"📸 Додавання {media_type} медіа\n\n"
+           "Надішли:\n"
+           "💬 Текст (буде показано як повідомлення)\n"
+           "🖼 Фото\n"
+           "🎬 Гіфку\n"
+           "🎥 Відео\n"
+           "🔗 URL на медіа\n\n"
+           "/done - завершити\n"
+           "/cancel - скасувати")
+    
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.reply_text(msg)
+    else:
+        await update.message.reply_text(msg)
+    
+    return CHOOSING_CHECKIN_MEDIA if media_type == 'checkin' else CHOOSING_CHECKOUT_MEDIA
+
+async def receive_media(update: Update, media_type: str):
+    """Отримати медіа будь-якого типу"""
+    user_id = update.effective_user.id
+    media_list = get_media(user_id)[media_type]
+    
+    media_item = None
+    
+    # Якщо це текст
+    if update.message.text:
+        text = update.message.text.strip()
+        if text.startswith('http'):
+            # URL - визначаємо тип
+            if any(ext in text.lower() for ext in ['.gif', 'giphy.com', 'tenor.com']):
+                media_item = {"type": "animation", "content": text}
+            elif any(ext in text.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp']):
+                media_item = {"type": "photo", "content": text}
+            elif any(ext in text.lower() for ext in ['.mp4', '.mov', 'youtube.com', 'youtu.be']):
+                media_item = {"type": "video", "content": text}
+            else:
+                media_item = {"type": "animation", "content": text}  # За замовчуванням гіфка
+        else:
+            # Звичайний текст
+            media_item = {"type": "text", "content": text}
+    
+    # Якщо це фото
+    elif update.message.photo:
+        media_item = {"type": "photo", "content": update.message.photo[-1].file_id}
+    
+    # Якщо це гіфка/анімація
+    elif update.message.animation:
+        media_item = {"type": "animation", "content": update.message.animation.file_id}
+    
+    # Якщо це відео
+    elif update.message.video:
+        media_item = {"type": "video", "content": update.message.video.file_id}
+    
+    if media_item:
+        media_list.append(media_item)
+        type_emoji = {
+            "text": "💬",
+            "photo": "🖼",
+            "animation": "🎬",
+            "video": "🎥"
+        }
+        emoji = type_emoji.get(media_item["type"], "📎")
+        await update.message.reply_text(
+            f"✅ {emoji} Додано!\n"
+            f"Всього: {len(media_list)} медіа\n"
+            f"/done щоб завершити"
+        )
+    else:
+        await update.message.reply_text(
+            "❌ Надішли:\n"
+            "• 💬 Текст\n"
+            "• 🖼 Фото\n"
+            "• 🎬 Гіфку\n"
+            "• 🎥 Відео\n"
+            "• 🔗 URL на медіа"
+        )
+    
+    return CHOOSING_CHECKIN_MEDIA if media_type == 'checkin' else CHOOSING_CHECKOUT_MEDIA
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробка всіх кнопок"""
+    """Обробка кнопок"""
     query = update.callback_query
     data = query.data
     user_id = update.effective_user.id
+    username = update.effective_user.first_name
     
-    if data == 'choose_checkin':
-        await show_media_selection(update, user_id, 'checkin')
-    elif data == 'choose_checkout':
-        await show_media_selection(update, user_id, 'checkout')
-    elif data.startswith('checkin_media_'):
-        await preview_media(update, user_id, 'checkin', int(data.split('_')[-1]))
-    elif data.startswith('checkout_media_'):
-        await preview_media(update, user_id, 'checkout', int(data.split('_')[-1]))
-    elif data == 'confirm_checkin':
-        await confirm_action(update, user_id, 'checkin')
-    elif data == 'confirm_checkout':
-        await confirm_action(update, user_id, 'checkout')
+    if data == 'checkin':
+        await show_workload_selection(update, 'checkin')
+    elif data == 'checkout':
+        await show_workload_selection(update, 'checkout')
+    elif data.startswith('checkin_workload_'):
+        workload = data.split('_')[-1]
+        await checkin(update, user_id, username, workload)
+    elif data.startswith('checkout_workload_'):
+        workload = data.split('_')[-1]
+        await checkout(update, user_id, username, workload)
     elif data == 'status':
         await status(update, context)
+    elif data == 'team':
+        await team_status(update, context)
     elif data == 'settings':
         await settings_menu(update, context)
     elif data == 'add_checkin':
@@ -287,11 +414,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'reset_media':
         user_media[user_id] = {'checkin': DEFAULT_CHECKIN.copy(), 'checkout': DEFAULT_CHECKOUT.copy()}
         await query.answer("🔄 Скинуто!")
-        await query.message.reply_text("✅ Медіа скинуто до стандартних")
+        await query.message.reply_text("✅ Медіа скинуто")
     elif data == 'back_to_main':
         keyboard = create_keyboard([
-            [("✅ Check-in", 'choose_checkin'), ("🚪 Check-out", 'choose_checkout')],
-            [("📊 Мій статус", 'status')],
+            [("✅ Check-in", 'checkin'), ("🚪 Check-out", 'checkout')],
+            [("📊 Мій статус", 'status'), ("👥 Команда", 'team')],
             [("🎨 Налаштувати медіа", 'settings')]
         ])
         await query.answer()
@@ -306,7 +433,8 @@ def main():
     
     if FLASK_AVAILABLE:
         Thread(target=run_flask, daemon=True).start()
-        logger.info("Flask запущено!")
+        Thread(target=keep_alive, daemon=True).start()
+        logger.info("Flask + Keep-alive запущено!")
     
     app = Application.builder().token(TOKEN).build()
     
@@ -319,12 +447,12 @@ def main():
         states={
             CHOOSING_CHECKIN_MEDIA: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: receive_media(u, 'checkin')),
-                MessageHandler(filters.PHOTO | filters.ANIMATION, lambda u, c: receive_media(u, 'checkin')),
+                MessageHandler(filters.PHOTO | filters.ANIMATION | filters.VIDEO, lambda u, c: receive_media(u, 'checkin')),
                 CommandHandler("done", lambda u, c: (u.message.reply_text("✅ Збережено!"), ConversationHandler.END)[1]),
             ],
             CHOOSING_CHECKOUT_MEDIA: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: receive_media(u, 'checkout')),
-                MessageHandler(filters.PHOTO | filters.ANIMATION, lambda u, c: receive_media(u, 'checkout')),
+                MessageHandler(filters.PHOTO | filters.ANIMATION | filters.VIDEO, lambda u, c: receive_media(u, 'checkout')),
                 CommandHandler("done", lambda u, c: (u.message.reply_text("✅ Збережено!"), ConversationHandler.END)[1]),
             ],
         },
