@@ -1,6 +1,25 @@
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+# Простий HTTP сервер для Render
+class SimpleHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+        self.wfile.write(b'Bot is running!')
+    
+    def log_message(self, format, *args):
+        pass  # Вимикаємо логи HTTP
+
+def run_http_server():
+    port = int(os.getenv('PORT', 10000))
+    server = HTTPServer(('0.0.0.0', port), SimpleHandler)
+    print(f"HTTP server on port {port}")
+    server.serve_forever()
 
 # Зберігання статусу користувачів
 user_status = {}
@@ -117,6 +136,9 @@ def main():
     if not TOKEN:
         print("❌ Додай BOT_TOKEN!")
         return
+    
+    # Запускаємо HTTP сервер в окремому потоці
+    Thread(target=run_http_server, daemon=True).start()
     
     app = Application.builder().token(TOKEN).build()
     
