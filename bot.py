@@ -5,7 +5,14 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 from datetime import datetime
 import random
 from threading import Thread
-from flask import Flask
+
+# Намагаємось імпортувати Flask
+try:
+    from flask import Flask
+    FLASK_AVAILABLE = True
+except ImportError:
+    FLASK_AVAILABLE = False
+    logger.warning("Flask не встановлено, запускаємось без веб-сервера")
 
 # Налаштування логування
 logging.basicConfig(
@@ -14,21 +21,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Flask додаток для Render (щоб не засинав)
-app = Flask(__name__)
+# Flask додаток для Render (якщо доступний)
+if FLASK_AVAILABLE:
+    app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return "🤖 Telegram Bot is running!"
+    @app.route('/')
+    def home():
+        return "🤖 Telegram Bot is running!"
 
-@app.route('/health')
-def health():
-    return "OK", 200
+    @app.route('/health')
+    def health():
+        return "OK", 200
 
-def run_flask():
-    """Запустити Flask в окремому потоці"""
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
+    def run_flask():
+        """Запустити Flask в окремому потоці"""
+        port = int(os.environ.get('PORT', 10000))
+        app.run(host='0.0.0.0', port=port)
+else:
+    def run_flask():
+        """Заглушка якщо Flask недоступний"""
+        pass
 
 # Стани для conversation handler
 CHOOSING_CHECKIN_MEDIA, CHOOSING_CHECKOUT_MEDIA = range(2)
@@ -493,10 +505,13 @@ def main():
         logger.error("BOT_TOKEN не знайдено! Додай змінну середовища BOT_TOKEN")
         return
     
-    # Запускаємо Flask в окремому потоці
-    flask_thread = Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    logger.info("Flask сервер запущено!")
+    # Запускаємо Flask в окремому потоці (якщо доступний)
+    if FLASK_AVAILABLE:
+        flask_thread = Thread(target=run_flask, daemon=True)
+        flask_thread.start()
+        logger.info("Flask сервер запущено!")
+    else:
+        logger.warning("Flask недоступний, бот працює без веб-сервера")
     
     application = Application.builder().token(TOKEN).build()
     
