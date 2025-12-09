@@ -38,10 +38,83 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🚪 Check-out", callback_data='checkout')],
         [InlineKeyboardButton("👥 Команда", callback_data='team')]
     ]
+    # Видаляємо попереднє меню якщо є
+    try:
+        await update.message.delete()
+    except:
+        pass
+    
     await update.message.reply_text(
         '👋 Привіт! Бот для відмітки робочого часу.',
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+
+async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /checkin - показує вибір завантаження"""
+    keyboard = [
+        [InlineKeyboardButton("🟢 Потрібні задачі", callback_data='work_🟢')],
+        [InlineKeyboardButton("🟡 Середня завантаженість", callback_data='work_🟡')],
+        [InlineKeyboardButton("🔴 Завантаженість до пенсії", callback_data='work_🔴')]
+    ]
+    
+    # Видаляємо команду
+    try:
+        await update.message.delete()
+    except:
+        pass
+    
+    await update.message.reply_text(
+        '📊 Обери рівень завантаження:',
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+async def checkout_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /checkout"""
+    user_id = update.effective_user.id
+    username = update.effective_user.first_name
+    
+    # Видаляємо команду
+    try:
+        await update.message.delete()
+    except:
+        pass
+    
+    if user_id not in user_status or not user_status[user_id]['active']:
+        await update.message.reply_text("❗ Спочатку зроби check-in!")
+        return
+    
+    workload = user_status[user_id]['workload']
+    user_status[user_id]['active'] = False
+    
+    await update.message.reply_text(
+        f"🚪 {username} закінчив робочий день!\n"
+        f"{workload} {WORKLOAD[workload]}\n\n"
+        f"👏 Чудова робота!"
+    )
+
+async def team_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /team"""
+    # Видаляємо команду
+    try:
+        await update.message.delete()
+    except:
+        pass
+    
+    if not user_status:
+        msg = "📊 Немає даних"
+    else:
+        online = [f"{d['workload']} {d['username']} - {WORKLOAD[d['workload']]}" 
+                  for d in user_status.values() if d['active']]
+        offline = [f"⭕ {d['username']}" 
+                   for d in user_status.values() if not d['active']]
+        
+        msg = "👥 Статус команди:\n\n"
+        if online:
+            msg += "🟢 На роботі:\n" + "\n".join(online) + "\n\n"
+        if offline:
+            msg += "🔴 Не на роботі:\n" + "\n".join(offline)
+    
+    await update.message.reply_text(msg)
 
 async def show_workload(update: Update):
     """Показати вибір завантаження"""
@@ -51,7 +124,13 @@ async def show_workload(update: Update):
         [InlineKeyboardButton("🔴 Завантаженість до пенсії", callback_data='work_🔴')]
     ]
     await update.callback_query.answer()
-    await update.callback_query.message.edit_text(
+    # Видаляємо меню
+    try:
+        await update.callback_query.message.delete()
+    except:
+        pass
+    # Відправляємо нове
+    await update.callback_query.message.reply_text(
         '📊 Обери рівень завантаження:',
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
@@ -72,11 +151,24 @@ async def checkin(update: Update, workload: str):
     }
     
     await update.callback_query.answer("✅ Check-in!")
-    await update.callback_query.message.reply_text(
+    
+    # Видаляємо меню вибору
+    try:
+        await update.callback_query.message.delete()
+    except:
+        pass
+    
+    # Відправляємо підтвердження
+    msg = await update.callback_query.message.reply_text(
         f"✅ {username} почав робочий день!\n"
         f"{workload} {WORKLOAD[workload]}\n\n"
         f"💪 Продуктивної роботи!"
     )
+    
+    # Видаляємо підтвердження через 3 секунди (опціонально)
+    # import asyncio
+    # await asyncio.sleep(3)
+    # await msg.delete()
 
 async def checkout(update: Update):
     """Check-out"""
@@ -91,6 +183,13 @@ async def checkout(update: Update):
     user_status[user_id]['active'] = False
     
     await update.callback_query.answer("✅ Check-out!")
+    
+    # Видаляємо меню
+    try:
+        await update.callback_query.message.delete()
+    except:
+        pass
+    
     await update.callback_query.message.reply_text(
         f"🚪 {username} закінчив робочий день!\n"
         f"{workload} {WORKLOAD[workload]}\n\n"
@@ -114,6 +213,13 @@ async def team(update: Update):
             msg += "🔴 Не на роботі:\n" + "\n".join(offline)
     
     await update.callback_query.answer()
+    
+    # Видаляємо меню
+    try:
+        await update.callback_query.message.delete()
+    except:
+        pass
+    
     await update.callback_query.message.reply_text(msg)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -143,6 +249,9 @@ def main():
     app = Application.builder().token(TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("checkin", checkin_command))
+    app.add_handler(CommandHandler("checkout", checkout_command))
+    app.add_handler(CommandHandler("team", team_command))
     app.add_handler(CallbackQueryHandler(button_handler))
     
     print("🤖 Бот запущено!")
