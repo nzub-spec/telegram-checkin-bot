@@ -37,7 +37,7 @@ DEFAULT_CHECKIN = [
 
 DEFAULT_CHECKOUT = [
     {"type": "text", "content": "До завтра 👋"},
-    {"type": "text", "content": "До пʼятниці 🎉"},
+    {"type": "text", "content": "До понеділка 🎉"},
     {"type": "text", "content": "Гарного вечора! 🌙"},
 ]
 
