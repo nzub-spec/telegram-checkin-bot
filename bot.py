@@ -156,7 +156,11 @@ async def do_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE, media_i
         return
     user_status[user_id] = {'active': True, 'username': username, 'workload': workload}
     await update.callback_query.answer("✅ Check-in!")
-    # НЕ ВИДАЛЯЄМО ПОВІДОМЛЕННЯ З МЕДІА
+    # ВИДАЛЯЄМО ПОВІДОМЛЕННЯ З ВИБОРОМ ЗАВАНТАЖЕНОСТІ
+    try: 
+        await update.callback_query.message.delete()
+    except: 
+        pass
     msg = f"✅ {username} почав день!\n"
     if workload:
         msg += f"{workload} {WORKLOAD[workload]}\n"
