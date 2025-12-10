@@ -36,6 +36,48 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("✅ Check-in", callback_data='checkin')], [InlineKeyboardButton("🚪 Check-out", callback_data='checkout')], [InlineKeyboardButton("👥 Команда", callback_data='team')], [InlineKeyboardButton("🎨 Налаштування", callback_data='settings')]]
     await context.bot.send_message(chat_id=chat_id, text='👋 Бот для відмітки часу', reply_markup=InlineKeyboardMarkup(keyboard))
 
+async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    media = get_media(user_id)
+    try: 
+        await update.message.delete()
+    except: 
+        pass
+    if not media['checkin']:
+        await context.bot.send_message(chat_id=chat_id, text='📚 Бібліотека check-in порожня! Додай медіа через /start → 🎨 Налаштування')
+        return
+    keyboard = []
+    for i, item in enumerate(media['checkin'][:10]):
+        emoji = {'text': '💬', 'photo': '🖼', 'animation': '🎬', 'video': '🎥'}.get(item['type'], '📄')
+        if item['type'] == 'text':
+            text = item['content'][:30] + '...' if len(item['content']) > 30 else item['content']
+            keyboard.append([InlineKeyboardButton(f"{emoji} {text}", callback_data=f'ci_{i}')])
+        else:
+            keyboard.append([InlineKeyboardButton(f"{emoji} Медіа #{i+1}", callback_data=f'ci_{i}')])
+    await context.bot.send_message(chat_id=chat_id, text='📚 Обери Check-in:', reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def checkout_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    media = get_media(user_id)
+    try: 
+        await update.message.delete()
+    except: 
+        pass
+    if not media['checkout']:
+        await context.bot.send_message(chat_id=chat_id, text='📚 Бібліотека check-out порожня! Додай медіа через /start → 🎨 Налаштування')
+        return
+    keyboard = []
+    for i, item in enumerate(media['checkout'][:10]):
+        emoji = {'text': '💬', 'photo': '🖼', 'animation': '🎬', 'video': '🎥'}.get(item['type'], '📄')
+        if item['type'] == 'text':
+            text = item['content'][:30] + '...' if len(item['content']) > 30 else item['content']
+            keyboard.append([InlineKeyboardButton(f"{emoji} {text}", callback_data=f'co_{i}')])
+        else:
+            keyboard.append([InlineKeyboardButton(f"{emoji} Медіа #{i+1}", callback_data=f'co_{i}')])
+    await context.bot.send_message(chat_id=chat_id, text='📚 Обери Check-out:', reply_markup=InlineKeyboardMarkup(keyboard))
+
 async def settings(update: Update):
     user_id = update.effective_user.id
     media = get_media(user_id)
@@ -271,6 +313,8 @@ def main():
     app = Application.builder().token(TOKEN).build()
     conv = ConversationHandler(entry_points=[CallbackQueryHandler(start_add_checkin, pattern='^add_checkin$'), CallbackQueryHandler(start_add_checkout, pattern='^add_checkout$')], states={ADDING_CHECKIN_MEDIA: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_checkin), MessageHandler(filters.PHOTO | filters.ANIMATION | filters.VIDEO, receive_checkin), CommandHandler("done", done)], ADDING_CHECKOUT_MEDIA: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_checkout), MessageHandler(filters.PHOTO | filters.ANIMATION | filters.VIDEO, receive_checkout), CommandHandler("done", done)]}, fallbacks=[CommandHandler("cancel", cancel)])
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("checkin", checkin_command))
+    app.add_handler(CommandHandler("checkout", checkout_command))
     app.add_handler(conv)
     app.add_handler(CallbackQueryHandler(buttons))
     print("🤖 Бот запущено!")
