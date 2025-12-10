@@ -272,4 +272,9 @@ def main():
     conv = ConversationHandler(entry_points=[CallbackQueryHandler(start_add_checkin, pattern='^add_checkin$'), CallbackQueryHandler(start_add_checkout, pattern='^add_checkout$')], states={ADDING_CHECKIN_MEDIA: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_checkin), MessageHandler(filters.PHOTO | filters.ANIMATION | filters.VIDEO, receive_checkin), CommandHandler("done", done)], ADDING_CHECKOUT_MEDIA: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_checkout), MessageHandler(filters.PHOTO | filters.ANIMATION | filters.VIDEO, receive_checkout), CommandHandler("done", done)]}, fallbacks=[CommandHandler("cancel", cancel)])
     app.add_handler(CommandHandler("start", start))
     app.add_handler(conv)
-    app.add_handler(CallbackQuer
+    app.add_handler(CallbackQueryHandler(buttons))
+    print("🤖 Бот запущено!")
+    app.run_polling(drop_pending_updates=True)
+
+if __name__ == '__main__':
+    main()
