@@ -1,10 +1,15 @@
 import os
+import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters, ConversationHandler
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 ADDING_CHECKIN_MEDIA, ADDING_CHECKOUT_MEDIA = range(2)
+
+# Файли для збереження даних
+DATA_FILE = 'user_data.json'
+STATUS_FILE = 'user_status.json'
 
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -17,6 +22,50 @@ class SimpleHandler(BaseHTTPRequestHandler):
 
 def run_http():
     HTTPServer(('0.0.0.0', int(os.getenv('PORT', 10000))), SimpleHandler).serve_forever()
+
+# Функції для роботи з файлами
+def load_data():
+    """Завантажити дані користувачів з файлу"""
+    global user_media, user_status
+    try:
+        if os.path.exists(DATA_FILE):
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                user_media = json.load(f)
+                # Конвертуємо ключі назад в int
+                user_media = {int(k): v for k, v in user_media.items()}
+        else:
+            user_media = {}
+    except Exception as e:
+        print(f"❌ Помилка завантаження медіа: {e}")
+        user_media = {}
+    
+    try:
+        if os.path.exists(STATUS_FILE):
+            with open(STATUS_FILE, 'r', encoding='utf-8') as f:
+                user_status = json.load(f)
+                # Конвертуємо ключі назад в int
+                user_status = {int(k): v for k, v in user_status.items()}
+        else:
+            user_status = {}
+    except Exception as e:
+        print(f"❌ Помилка завантаження статусу: {e}")
+        user_status = {}
+
+def save_data():
+    """Зберегти дані користувачів у файл"""
+    try:
+        with open(DATA_FILE, 'w', encoding='utf-8') as f:
+            # Конвертуємо ключі в str для JSON
+            json.dump({str(k): v for k, v in user_media.items()}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"❌ Помилка збереження медіа: {e}")
+    
+    try:
+        with open(STATUS_FILE, 'w', encoding='utf-8') as f:
+            # Конвертуємо ключі в str для JSON
+            json.dump({str(k): v for k, v in user_status.items()}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"❌ Помилка збереження статусу: {e}")
 
 user_status = {}
 user_media = {}
@@ -155,6 +204,7 @@ async def do_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE, media_i
         await update.callback_query.answer("Вже на роботі!")
         return
     user_status[user_id] = {'active': True, 'username': username, 'workload': workload}
+    save_data()  # Зберігаємо статус
     await update.callback_query.answer("✅ Check-in!")
     # ВИДАЛЯЄМО ПОВІДОМЛЕННЯ З ВИБОРОМ ЗАВАНТАЖЕНОСТІ
     try: 
@@ -179,6 +229,7 @@ async def do_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE, media_
         await update.callback_query.answer("Спочатку check-in!")
         return
     user_status[user_id]['active'] = False
+    save_data()  # Зберігаємо статус
     await update.callback_query.answer("✅ Check-out!")
     # НЕ ВИДАЛЯЄМО ПОВІДОМЛЕННЯ З МЕДІА
     msg = f"🚪 {username} закінчив день!\n\n👏 Чудова робота!"
@@ -261,6 +312,7 @@ async def receive_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif update.message.video:
         media['checkin'].append({'type': 'video', 'content': update.message.video.file_id})
         await update.message.reply_text(f'✅ Додано! Всього: {len(media["checkin"])}')
+    save_data()  # Зберігаємо після кожного додавання
     return ADDING_CHECKIN_MEDIA
 
 async def receive_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -278,6 +330,7 @@ async def receive_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif update.message.video:
         media['checkout'].append({'type': 'video', 'content': update.message.video.file_id})
         await update.message.reply_text(f'✅ Додано! Всього: {len(media["checkout"])}')
+    save_data()  # Зберігаємо після кожного додавання
     return ADDING_CHECKOUT_MEDIA
 
 async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -313,9 +366,11 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await settings(update, context)
     elif data == 'clear_checkin':
         get_media(update.effective_user.id)['checkin'] = []
+        save_data()  # Зберігаємо після очищення
         await update.callback_query.answer("🗑 Очищено!")
     elif data == 'clear_checkout':
         get_media(update.effective_user.id)['checkout'] = []
+        save_data()  # Зберігаємо після очищення
         await update.callback_query.answer("🗑 Очищено!")
     elif data == 'view_lib':
         media = get_media(update.effective_user.id)
@@ -337,6 +392,11 @@ def main():
     if not TOKEN:
         print("❌ BOT_TOKEN не знайдено!")
         return
+    
+    # Завантажуємо збережені дані
+    load_data()
+    print(f"📂 Завантажено даних користувачів: {len(user_media)}")
+    
     Thread(target=run_http, daemon=True).start()
     app = Application.builder().token(TOKEN).build()
     conv = ConversationHandler(entry_points=[CallbackQueryHandler(start_add_checkin, pattern='^add_checkin$'), CallbackQueryHandler(start_add_checkout, pattern='^add_checkout$')], states={ADDING_CHECKIN_MEDIA: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_checkin), MessageHandler(filters.PHOTO | filters.ANIMATION | filters.VIDEO, receive_checkin), CommandHandler("done", done)], ADDING_CHECKOUT_MEDIA: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_checkout), MessageHandler(filters.PHOTO | filters.ANIMATION | filters.VIDEO, receive_checkout), CommandHandler("done", done)]}, fallbacks=[CommandHandler("cancel", cancel)])
