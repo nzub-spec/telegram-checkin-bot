@@ -275,6 +275,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = update.callback_query.data
     
+    # Не обробляємо add_checkin та add_checkout тут, бо їх обробляє ConversationHandler
+    if data in ['add_checkin', 'add_checkout']:
+        return
+    
     if data == 'checkin':
         await show_checkin_library(update)
     elif data.startswith('ci_'):
@@ -294,10 +298,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await team(update)
     elif data == 'settings':
         await settings(update)
-    elif data == 'add_checkin':
-        await start_add_checkin(update, context)
-    elif data == 'add_checkout':
-        await start_add_checkout(update, context)
     elif data == 'clear_checkin':
         get_media(update.effective_user.id)['checkin'] = []
         await update.callback_query.answer("🗑 Очищено!")
@@ -332,7 +332,30 @@ def main():
     app = Application.builder().token(TOKEN).build()
     
     conv = ConversationHandler(
-        entry_points=[],
+        entry_points=[
+            CallbackQueryHandler(start_add_checkin, pattern='^add_checkin
+    
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(conv)
+    app.add_handler(CallbackQueryHandler(buttons))
+    
+    print("🤖 Бот запущено!")
+    app.run_polling(drop_pending_updates=True)
+
+if __name__ == '__main__':
+    main()),
+            CallbackQueryHandler(start_add_checkout, pattern='^add_checkout
+    
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(conv)
+    app.add_handler(CallbackQueryHandler(buttons))
+    
+    print("🤖 Бот запущено!")
+    app.run_polling(drop_pending_updates=True)
+
+if __name__ == '__main__':
+    main()),
+        ],
         states={
             ADDING_CHECKIN_MEDIA: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_checkin),
