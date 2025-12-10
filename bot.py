@@ -156,10 +156,7 @@ async def do_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE, media_i
         return
     user_status[user_id] = {'active': True, 'username': username, 'workload': workload}
     await update.callback_query.answer("✅ Check-in!")
-    try: 
-        await update.callback_query.message.delete()
-    except: 
-        pass
+    # НЕ ВИДАЛЯЄМО ПОВІДОМЛЕННЯ З МЕДІА
     msg = f"✅ {username} почав день!\n"
     if workload:
         msg += f"{workload} {WORKLOAD[workload]}\n"
@@ -179,10 +176,7 @@ async def do_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE, media_
         return
     user_status[user_id]['active'] = False
     await update.callback_query.answer("✅ Check-out!")
-    try: 
-        await update.callback_query.message.delete()
-    except: 
-        pass
+    # НЕ ВИДАЛЯЄМО ПОВІДОМЛЕННЯ З МЕДІА
     msg = f"🚪 {username} закінчив день!\n\n👏 Чудова робота!"
     media = get_media(user_id)
     if media['checkout']:
