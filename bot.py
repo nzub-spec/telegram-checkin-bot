@@ -7,7 +7,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-ADDING_CHECKIN_MEDIA, ADDING_CHECKOUT_MEDIA = range(2)
+ADDING_CHECKIN_MEDIA, ADDING_CHECKOUT_MEDIA, NAMING_CHECKIN_MEDIA, NAMING_CHECKOUT_MEDIA = range(4)
 
 # Database connection
 def get_db_connection():
@@ -402,7 +402,7 @@ async def start_add_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.message.delete()
     except: 
         pass
-    await context.bot.send_message(chat_id=chat_id, text='📸 Надішли медіа:\n• 💬 Текст\n• 🖼 Фото (+ підпис як назва)\n• 🎬 Гіфку (+ підпис як назва)\n• 🎥 Відео (+ підпис як назва)\n\n/done - готово, /cancel - скасувати')
+    await context.bot.send_message(chat_id=chat_id, text='📸 Надішли медіа:\n• 💬 Текст\n• 🖼 Фото\n• 🎬 Гіфку\n• 🎥 Відео\n\nПісля медіа система попросить назву.\n\n/done - готово, /cancel - скасувати')
     return ADDING_CHECKIN_MEDIA
 
 async def start_add_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -412,45 +412,111 @@ async def start_add_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.callback_query.message.delete()
     except: 
         pass
-    await context.bot.send_message(chat_id=chat_id, text='📸 Надішли медіа:\n• 💬 Текст\n• 🖼 Фото (+ підпис як назва)\n• 🎬 Гіфку (+ підпис як назва)\n• 🎥 Відео (+ підпис як назва)\n\n/done - готово, /cancel - скасувати')
+    await context.bot.send_message(chat_id=chat_id, text='📸 Надішли медіа:\n• 💬 Текст\n• 🖼 Фото\n• 🎬 Гіфку\n• 🎥 Відео\n\nПісля медіа система попросить назву.\n\n/done - готово, /cancel - скасувати')
     return ADDING_CHECKOUT_MEDIA
 
 async def receive_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    media = get_media()  # Спільна бібліотека
-    caption = update.message.caption or ""  # Отримуємо підпис якщо є
-    
     if update.message.text:
+        # Текст додаємо відразу
+        media = get_media()
         media['checkin'].append({'type': 'text', 'content': update.message.text, 'name': ''})
+        save_shared_media_to_db(media)
         await update.message.reply_text(f'✅ Додано! Всього: {len(media["checkin"])}')
+        return ADDING_CHECKIN_MEDIA
     elif update.message.photo:
-        media['checkin'].append({'type': 'photo', 'content': update.message.photo[-1].file_id, 'name': caption})
-        await update.message.reply_text(f'✅ Додано{":" + caption if caption else ""}! Всього: {len(media["checkin"])}')
+        # Зберігаємо фото тимчасово і просимо назву
+        context.user_data['temp_media'] = {'type': 'photo', 'content': update.message.photo[-1].file_id}
+        await update.message.reply_text('📝 Надішли назву для цього фото (або /skip щоб пропустити):')
+        return NAMING_CHECKIN_MEDIA
     elif update.message.animation:
-        media['checkin'].append({'type': 'animation', 'content': update.message.animation.file_id, 'name': caption})
-        await update.message.reply_text(f'✅ Додано{":" + caption if caption else ""}! Всього: {len(media["checkin"])}')
+        # Зберігаємо гіфку тимчасово і просимо назву
+        context.user_data['temp_media'] = {'type': 'animation', 'content': update.message.animation.file_id}
+        await update.message.reply_text('📝 Надішли назву для цієї гіфки (або /skip щоб пропустити):')
+        return NAMING_CHECKIN_MEDIA
     elif update.message.video:
-        media['checkin'].append({'type': 'video', 'content': update.message.video.file_id, 'name': caption})
-        await update.message.reply_text(f'✅ Додано{":" + caption if caption else ""}! Всього: {len(media["checkin"])}')
-    save_shared_media_to_db(media)  # Зберігаємо спільну бібліотеку в БД
+        # Зберігаємо відео тимчасово і просимо назву
+        context.user_data['temp_media'] = {'type': 'video', 'content': update.message.video.file_id}
+        await update.message.reply_text('📝 Надішли назву для цього відео (або /skip щоб пропустити):')
+        return NAMING_CHECKIN_MEDIA
+    return ADDING_CHECKIN_MEDIA
+
+async def name_checkin_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Зберегти назву для check-in медіа"""
+    media = get_media()
+    temp_media = context.user_data.get('temp_media')
+    
+    if not temp_media:
+        await update.message.reply_text('❌ Помилка: медіа не знайдено')
+        return ADDING_CHECKIN_MEDIA
+    
+    # Отримуємо назву або залишаємо порожньою
+    name = update.message.text if update.message.text and update.message.text != '/skip' else ''
+    
+    # Додаємо медіа з назвою
+    temp_media['name'] = name
+    media['checkin'].append(temp_media)
+    save_shared_media_to_db(media)
+    
+    # Очищаємо тимчасові дані
+    context.user_data.pop('temp_media', None)
+    
+    if name:
+        await update.message.reply_text(f'✅ Додано "{name}"! Всього: {len(media["checkin"])}')
+    else:
+        await update.message.reply_text(f'✅ Додано! Всього: {len(media["checkin"])}')
+    
     return ADDING_CHECKIN_MEDIA
 
 async def receive_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    media = get_media()  # Спільна бібліотека
-    caption = update.message.caption or ""  # Отримуємо підпис якщо є
-    
     if update.message.text:
+        # Текст додаємо відразу
+        media = get_media()
         media['checkout'].append({'type': 'text', 'content': update.message.text, 'name': ''})
+        save_shared_media_to_db(media)
         await update.message.reply_text(f'✅ Додано! Всього: {len(media["checkout"])}')
+        return ADDING_CHECKOUT_MEDIA
     elif update.message.photo:
-        media['checkout'].append({'type': 'photo', 'content': update.message.photo[-1].file_id, 'name': caption})
-        await update.message.reply_text(f'✅ Додано{":" + caption if caption else ""}! Всього: {len(media["checkout"])}')
+        # Зберігаємо фото тимчасово і просимо назву
+        context.user_data['temp_media'] = {'type': 'photo', 'content': update.message.photo[-1].file_id}
+        await update.message.reply_text('📝 Надішли назву для цього фото (або /skip щоб пропустити):')
+        return NAMING_CHECKOUT_MEDIA
     elif update.message.animation:
-        media['checkout'].append({'type': 'animation', 'content': update.message.animation.file_id, 'name': caption})
-        await update.message.reply_text(f'✅ Додано{":" + caption if caption else ""}! Всього: {len(media["checkout"])}')
+        # Зберігаємо гіфку тимчасово і просимо назву
+        context.user_data['temp_media'] = {'type': 'animation', 'content': update.message.animation.file_id}
+        await update.message.reply_text('📝 Надішли назву для цієї гіфки (або /skip щоб пропустити):')
+        return NAMING_CHECKOUT_MEDIA
     elif update.message.video:
-        media['checkout'].append({'type': 'video', 'content': update.message.video.file_id, 'name': caption})
-        await update.message.reply_text(f'✅ Додано{":" + caption if caption else ""}! Всього: {len(media["checkout"])}')
-    save_shared_media_to_db(media)  # Зберігаємо спільну бібліотеку в БД
+        # Зберігаємо відео тимчасово і просимо назву
+        context.user_data['temp_media'] = {'type': 'video', 'content': update.message.video.file_id}
+        await update.message.reply_text('📝 Надішли назву для цього відео (або /skip щоб пропустити):')
+        return NAMING_CHECKOUT_MEDIA
+    return ADDING_CHECKOUT_MEDIA
+
+async def name_checkout_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Зберегти назву для check-out медіа"""
+    media = get_media()
+    temp_media = context.user_data.get('temp_media')
+    
+    if not temp_media:
+        await update.message.reply_text('❌ Помилка: медіа не знайдено')
+        return ADDING_CHECKOUT_MEDIA
+    
+    # Отримуємо назву або залишаємо порожньою
+    name = update.message.text if update.message.text and update.message.text != '/skip' else ''
+    
+    # Додаємо медіа з назвою
+    temp_media['name'] = name
+    media['checkout'].append(temp_media)
+    save_shared_media_to_db(media)
+    
+    # Очищаємо тимчасові дані
+    context.user_data.pop('temp_media', None)
+    
+    if name:
+        await update.message.reply_text(f'✅ Додано "{name}"! Всього: {len(media["checkout"])}')
+    else:
+        await update.message.reply_text(f'✅ Додано! Всього: {len(media["checkout"])}')
+    
     return ADDING_CHECKOUT_MEDIA
 
 async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -530,7 +596,44 @@ def main():
     
     Thread(target=run_http, daemon=True).start()
     app = Application.builder().token(TOKEN).build()
-    conv = ConversationHandler(entry_points=[CallbackQueryHandler(start_add_checkin, pattern='^add_checkin$'), CallbackQueryHandler(start_add_checkout, pattern='^add_checkout$')], states={ADDING_CHECKIN_MEDIA: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_checkin), MessageHandler(filters.PHOTO | filters.ANIMATION | filters.VIDEO, receive_checkin), CommandHandler("done", done)], ADDING_CHECKOUT_MEDIA: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_checkout), MessageHandler(filters.PHOTO | filters.ANIMATION | filters.VIDEO, receive_checkout), CommandHandler("done", done)]}, fallbacks=[CommandHandler("cancel", cancel)])
+    
+    # Налаштовуємо команди для меню
+    async def post_init(application: Application):
+        from telegram import BotCommand
+        await application.bot.set_my_commands([
+            BotCommand("start", "🏠 Головне меню"),
+            BotCommand("checkin", "✅ Check-in"),
+            BotCommand("checkout", "🚪 Check-out"),
+        ])
+    
+    app.post_init = post_init
+    conv = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(start_add_checkin, pattern='^add_checkin$'), 
+            CallbackQueryHandler(start_add_checkout, pattern='^add_checkout$')
+        ], 
+        states={
+            ADDING_CHECKIN_MEDIA: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_checkin), 
+                MessageHandler(filters.PHOTO | filters.ANIMATION | filters.VIDEO, receive_checkin), 
+                CommandHandler("done", done)
+            ],
+            NAMING_CHECKIN_MEDIA: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, name_checkin_media),
+                CommandHandler("skip", name_checkin_media)
+            ],
+            ADDING_CHECKOUT_MEDIA: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_checkout), 
+                MessageHandler(filters.PHOTO | filters.ANIMATION | filters.VIDEO, receive_checkout), 
+                CommandHandler("done", done)
+            ],
+            NAMING_CHECKOUT_MEDIA: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, name_checkout_media),
+                CommandHandler("skip", name_checkout_media)
+            ]
+        }, 
+        fallbacks=[CommandHandler("cancel", cancel)]
+    )
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("checkin", checkin_command))
     app.add_handler(CommandHandler("checkout", checkout_command))
