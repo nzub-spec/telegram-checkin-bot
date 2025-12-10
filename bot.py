@@ -243,7 +243,14 @@ async def checkout_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     media = get_media()  # Спільна бібліотека
-    keyboard = [[InlineKeyboardButton("➕ Додати Check-in", callback_data='add_checkin')], [InlineKeyboardButton("➕ Додати Check-out", callback_data='add_checkout')], [InlineKeyboardButton("📋 Бібліотека", callback_data='view_lib')], [InlineKeyboardButton("🗑 Очистити Check-in", callback_data='clear_checkin')], [InlineKeyboardButton("🗑 Очистити Check-out", callback_data='clear_checkout')], [InlineKeyboardButton("⬅️ Назад", callback_data='back')]]
+    keyboard = [
+        [InlineKeyboardButton("➕ Додати Check-in", callback_data='add_checkin')], 
+        [InlineKeyboardButton("➕ Додати Check-out", callback_data='add_checkout')], 
+        [InlineKeyboardButton("📋 Бібліотека", callback_data='view_lib')], 
+        [InlineKeyboardButton("✏️ Редагувати Check-in", callback_data='edit_checkin')], 
+        [InlineKeyboardButton("✏️ Редагувати Check-out", callback_data='edit_checkout')], 
+        [InlineKeyboardButton("⬅️ Назад", callback_data='back')]
+    ]
     await update.callback_query.answer()
     try: 
         await update.callback_query.message.delete()
@@ -277,7 +284,103 @@ async def show_checkin_library(update: Update, context: ContextTypes.DEFAULT_TYP
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data='checkin')])
     await context.bot.send_message(chat_id=chat_id, text='📚 Обери Check-in:', reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def show_checkout_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def edit_checkin_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показати Check-in медіа для редагування/видалення"""
+    chat_id = update.effective_chat.id
+    media = get_media()
+    await update.callback_query.answer()
+    try: 
+        await update.callback_query.message.delete()
+    except: 
+        pass
+    
+    if not media['checkin']:
+        await context.bot.send_message(chat_id=chat_id, text='📚 Бібліотека порожня!')
+        return
+    
+    keyboard = []
+    for i, item in enumerate(media['checkin']):
+        emoji = {'text': '💬', 'photo': '🖼', 'animation': '🎬', 'video': '🎥'}.get(item['type'], '📄')
+        if item['type'] == 'text':
+            text = item['content'][:30] + '...' if len(item['content']) > 30 else item['content']
+            keyboard.append([InlineKeyboardButton(f"{emoji} {text}", callback_data=f'delci_{i}')])
+        else:
+            name = item.get('name', '') or f"Медіа #{i+1}"
+            display_name = name[:30] + '...' if len(name) > 30 else name
+            keyboard.append([InlineKeyboardButton(f"{emoji} {display_name}", callback_data=f'delci_{i}')])
+    
+    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data='settings')])
+    await context.bot.send_message(chat_id=chat_id, text='🗑 Натисни на медіа щоб видалити:', reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def edit_checkout_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показати Check-out медіа для редагування/видалення"""
+    chat_id = update.effective_chat.id
+    media = get_media()
+    await update.callback_query.answer()
+    try: 
+        await update.callback_query.message.delete()
+    except: 
+        pass
+    
+    if not media['checkout']:
+        await context.bot.send_message(chat_id=chat_id, text='📚 Бібліотека порожня!')
+        return
+    
+    keyboard = []
+    for i, item in enumerate(media['checkout']):
+        emoji = {'text': '💬', 'photo': '🖼', 'animation': '🎬', 'video': '🎥'}.get(item['type'], '📄')
+        if item['type'] == 'text':
+            text = item['content'][:30] + '...' if len(item['content']) > 30 else item['content']
+            keyboard.append([InlineKeyboardButton(f"{emoji} {text}", callback_data=f'delco_{i}')])
+        else:
+            name = item.get('name', '') or f"Медіа #{i+1}"
+            display_name = name[:30] + '...' if len(name) > 30 else name
+            keyboard.append([InlineKeyboardButton(f"{emoji} {display_name}", callback_data=f'delco_{i}')])
+    
+    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data='settings')])
+    await context.bot.send_message(chat_id=chat_id, text='🗑 Натисни на медіа щоб видалити:', reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def delete_checkin_item(update: Update, context: ContextTypes.DEFAULT_TYPE, idx: int):
+    """Видалити конкретний check-in елемент"""
+    media = get_media()
+    
+    if 0 <= idx < len(media['checkin']):
+        deleted_item = media['checkin'].pop(idx)
+        save_shared_media_to_db(media)
+        
+        # Показуємо що видалили
+        if deleted_item['type'] == 'text':
+            name = deleted_item['content'][:30]
+        else:
+            name = deleted_item.get('name', f"Медіа #{idx+1}")
+        
+        await update.callback_query.answer(f"🗑 Видалено: {name}")
+        
+        # Оновлюємо список
+        await edit_checkin_library(update, context)
+    else:
+        await update.callback_query.answer("❌ Помилка: елемент не знайдено")
+
+async def delete_checkout_item(update: Update, context: ContextTypes.DEFAULT_TYPE, idx: int):
+    """Видалити конкретний check-out елемент"""
+    media = get_media()
+    
+    if 0 <= idx < len(media['checkout']):
+        deleted_item = media['checkout'].pop(idx)
+        save_shared_media_to_db(media)
+        
+        # Показуємо що видалили
+        if deleted_item['type'] == 'text':
+            name = deleted_item['content'][:30]
+        else:
+            name = deleted_item.get('name', f"Медіа #{idx+1}")
+        
+        await update.callback_query.answer(f"🗑 Видалено: {name}")
+        
+        # Оновлюємо список
+        await edit_checkout_library(update, context)
+    else:
+        await update.callback_query.answer("❌ Помилка: елемент не знайдено")
     chat_id = update.effective_chat.id
     media = get_media()  # Спільна бібліотека
     await update.callback_query.answer()
@@ -550,16 +653,16 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await team(update, context)
     elif data == 'settings':
         await settings(update, context)
-    elif data == 'clear_checkin':
-        media = get_media()
-        media['checkin'] = []
-        save_shared_media_to_db(media)  # Зберігаємо спільну бібліотеку в БД
-        await update.callback_query.answer("🗑 Очищено!")
-    elif data == 'clear_checkout':
-        media = get_media()
-        media['checkout'] = []
-        save_shared_media_to_db(media)  # Зберігаємо спільну бібліотеку в БД
-        await update.callback_query.answer("🗑 Очищено!")
+    elif data == 'edit_checkin':
+        await edit_checkin_library(update, context)
+    elif data == 'edit_checkout':
+        await edit_checkout_library(update, context)
+    elif data.startswith('delci_'):
+        idx = int(data[6:])
+        await delete_checkin_item(update, context, idx)
+    elif data.startswith('delco_'):
+        idx = int(data[6:])
+        await delete_checkout_item(update, context, idx)
     elif data == 'view_lib':
         media = get_media()
         msg = f'📚 Спільна бібліотека:\n\n✅ Check-in: {len(media["checkin"])}\n🚪 Check-out: {len(media["checkout"])}'
