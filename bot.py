@@ -1,5 +1,7 @@
 import os
 import json
+import psycopg2
+from psycopg2.extras import Json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters, ConversationHandler
 from threading import Thread
@@ -7,9 +9,53 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 
 ADDING_CHECKIN_MEDIA, ADDING_CHECKOUT_MEDIA = range(2)
 
-# Файли для збереження даних
-DATA_FILE = 'user_data.json'
-STATUS_FILE = 'user_status.json'
+# Database connection
+def get_db_connection():
+    """Підключення до бази даних"""
+    try:
+        return psycopg2.connect(os.getenv('DATABASE_URL'))
+    except Exception as e:
+        print(f"❌ Помилка підключення до БД: {e}")
+        return None
+
+def init_db():
+    """Ініціалізація таблиць бази даних"""
+    conn = get_db_connection()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        # Таблиця для СПІЛЬНОЇ бібліотеки медіа (для всіх користувачів)
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS shared_media (
+                id SERIAL PRIMARY KEY,
+                media_type TEXT NOT NULL,
+                checkin_media JSONB DEFAULT '[]',
+                checkout_media JSONB DEFAULT '[]'
+            )
+        ''')
+        # Перевіряємо чи є запис, якщо ні - створюємо
+        cur.execute('SELECT COUNT(*) FROM shared_media')
+        if cur.fetchone()[0] == 0:
+            cur.execute("INSERT INTO shared_media (media_type, checkin_media, checkout_media) VALUES ('shared', '[]', '[]')")
+        
+        # Таблиця для статусів користувачів
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS user_status (
+                user_id BIGINT PRIMARY KEY,
+                active BOOLEAN DEFAULT FALSE,
+                username TEXT,
+                workload TEXT
+            )
+        ''')
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("✅ База даних ініціалізована")
+    except Exception as e:
+        print(f"❌ Помилка ініціалізації БД: {e}")
+        if conn:
+            conn.close()
 
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -23,58 +69,121 @@ class SimpleHandler(BaseHTTPRequestHandler):
 def run_http():
     HTTPServer(('0.0.0.0', int(os.getenv('PORT', 10000))), SimpleHandler).serve_forever()
 
-# Функції для роботи з файлами
-def load_data():
-    """Завантажити дані користувачів з файлу"""
-    global user_media, user_status
+# Функції для роботи з базою даних
+def get_shared_media_from_db():
+    """Отримати СПІЛЬНУ бібліотеку медіа з БД"""
+    conn = get_db_connection()
+    if not conn:
+        return {'checkin': [], 'checkout': []}
     try:
-        if os.path.exists(DATA_FILE):
-            with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                user_media = json.load(f)
-                # Конвертуємо ключі назад в int
-                user_media = {int(k): v for k, v in user_media.items()}
-        else:
-            user_media = {}
+        cur = conn.cursor()
+        cur.execute('SELECT checkin_media, checkout_media FROM shared_media WHERE media_type = %s', ('shared',))
+        result = cur.fetchone()
+        cur.close()
+        conn.close()
+        if result:
+            return {'checkin': result[0] or [], 'checkout': result[1] or []}
+        return {'checkin': [], 'checkout': []}
     except Exception as e:
-        print(f"❌ Помилка завантаження медіа: {e}")
-        user_media = {}
-    
-    try:
-        if os.path.exists(STATUS_FILE):
-            with open(STATUS_FILE, 'r', encoding='utf-8') as f:
-                user_status = json.load(f)
-                # Конвертуємо ключі назад в int
-                user_status = {int(k): v for k, v in user_status.items()}
-        else:
-            user_status = {}
-    except Exception as e:
-        print(f"❌ Помилка завантаження статусу: {e}")
-        user_status = {}
+        print(f"❌ Помилка читання медіа: {e}")
+        if conn:
+            conn.close()
+        return {'checkin': [], 'checkout': []}
 
-def save_data():
-    """Зберегти дані користувачів у файл"""
+def save_shared_media_to_db(media):
+    """Зберегти СПІЛЬНУ бібліотеку медіа в БД"""
+    conn = get_db_connection()
+    if not conn:
+        return
     try:
-        with open(DATA_FILE, 'w', encoding='utf-8') as f:
-            # Конвертуємо ключі в str для JSON
-            json.dump({str(k): v for k, v in user_media.items()}, f, ensure_ascii=False, indent=2)
+        cur = conn.cursor()
+        cur.execute('''
+            UPDATE shared_media 
+            SET checkin_media = %s, checkout_media = %s
+            WHERE media_type = %s
+        ''', (Json(media['checkin']), Json(media['checkout']), 'shared'))
+        conn.commit()
+        cur.close()
+        conn.close()
     except Exception as e:
         print(f"❌ Помилка збереження медіа: {e}")
-    
+        if conn:
+            conn.close()
+
+def get_user_status_from_db(user_id):
+    """Отримати статус користувача з БД"""
+    conn = get_db_connection()
+    if not conn:
+        return None
     try:
-        with open(STATUS_FILE, 'w', encoding='utf-8') as f:
-            # Конвертуємо ключі в str для JSON
-            json.dump({str(k): v for k, v in user_status.items()}, f, ensure_ascii=False, indent=2)
+        cur = conn.cursor()
+        cur.execute('SELECT active, username, workload FROM user_status WHERE user_id = %s', (user_id,))
+        result = cur.fetchone()
+        cur.close()
+        conn.close()
+        if result:
+            return {'active': result[0], 'username': result[1], 'workload': result[2]}
+        return None
+    except Exception as e:
+        print(f"❌ Помилка читання статусу: {e}")
+        if conn:
+            conn.close()
+        return None
+
+def save_user_status_to_db(user_id, status):
+    """Зберегти статус користувача в БД"""
+    conn = get_db_connection()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute('''
+            INSERT INTO user_status (user_id, active, username, workload)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (user_id) 
+            DO UPDATE SET active = %s, username = %s, workload = %s
+        ''', (user_id, status['active'], status['username'], status.get('workload'),
+              status['active'], status['username'], status.get('workload')))
+        conn.commit()
+        cur.close()
+        conn.close()
     except Exception as e:
         print(f"❌ Помилка збереження статусу: {e}")
+        if conn:
+            conn.close()
+
+def get_all_user_statuses():
+    """Отримати всі статуси користувачів"""
+    conn = get_db_connection()
+    if not conn:
+        return {}
+    try:
+        cur = conn.cursor()
+        cur.execute('SELECT user_id, active, username, workload FROM user_status')
+        results = cur.fetchall()
+        cur.close()
+        conn.close()
+        statuses = {}
+        for row in results:
+            statuses[row[0]] = {'active': row[1], 'username': row[2], 'workload': row[3]}
+        return statuses
+    except Exception as e:
+        print(f"❌ Помилка читання всіх статусів: {e}")
+        if conn:
+            conn.close()
+        return {}
 
 user_status = {}
-user_media = {}
+shared_media = {'checkin': [], 'checkout': []}  # Спільна бібліотека для всіх
 WORKLOAD = {'🟢': 'Потрібні задачі', '🟡': 'Середня завантаженість', '🔴': 'Завантаженість до пенсії'}
 
-def get_media(user_id):
-    if user_id not in user_media:
-        user_media[user_id] = {'checkin': [], 'checkout': []}
-    return user_media[user_id]
+def get_media(user_id=None):
+    """Отримати СПІЛЬНУ бібліотеку медіа (user_id не використовується, але залишаємо для сумісності)"""
+    global shared_media
+    if not shared_media['checkin'] and not shared_media['checkout']:
+        # Завантажуємо з БД, якщо ще не завантажено
+        shared_media = get_shared_media_from_db()
+    return shared_media
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -86,9 +195,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=chat_id, text='👋 Бот для відмітки часу', reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
     chat_id = update.effective_chat.id
-    media = get_media(user_id)
+    media = get_media()  # Спільна бібліотека
     try: 
         await update.message.delete()
     except: 
@@ -107,9 +215,8 @@ async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=chat_id, text='📚 Обери Check-in:', reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def checkout_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
     chat_id = update.effective_chat.id
-    media = get_media(user_id)
+    media = get_media()  # Спільна бібліотека
     try: 
         await update.message.delete()
     except: 
@@ -128,22 +235,20 @@ async def checkout_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=chat_id, text='📚 Обери Check-out:', reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
     chat_id = update.effective_chat.id
-    media = get_media(user_id)
+    media = get_media()  # Спільна бібліотека
     keyboard = [[InlineKeyboardButton("➕ Додати Check-in", callback_data='add_checkin')], [InlineKeyboardButton("➕ Додати Check-out", callback_data='add_checkout')], [InlineKeyboardButton("📋 Бібліотека", callback_data='view_lib')], [InlineKeyboardButton("🗑 Очистити Check-in", callback_data='clear_checkin')], [InlineKeyboardButton("🗑 Очистити Check-out", callback_data='clear_checkout')], [InlineKeyboardButton("⬅️ Назад", callback_data='back')]]
     await update.callback_query.answer()
     try: 
         await update.callback_query.message.delete()
     except: 
         pass
-    msg = f'🎨 Бібліотека:\n\n✅ Check-in: {len(media["checkin"])}\n🚪 Check-out: {len(media["checkout"])}'
+    msg = f'🎨 Спільна бібліотека:\n\n✅ Check-in: {len(media["checkin"])}\n🚪 Check-out: {len(media["checkout"])}'
     await context.bot.send_message(chat_id=chat_id, text=msg, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def show_checkin_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
     chat_id = update.effective_chat.id
-    media = get_media(user_id)
+    media = get_media()  # Спільна бібліотека
     await update.callback_query.answer()
     try: 
         await update.callback_query.message.delete()
@@ -164,9 +269,8 @@ async def show_checkin_library(update: Update, context: ContextTypes.DEFAULT_TYP
     await context.bot.send_message(chat_id=chat_id, text='📚 Обери Check-in:', reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def show_checkout_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
     chat_id = update.effective_chat.id
-    media = get_media(user_id)
+    media = get_media()  # Спільна бібліотека
     await update.callback_query.answer()
     try: 
         await update.callback_query.message.delete()
@@ -204,7 +308,7 @@ async def do_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE, media_i
         await update.callback_query.answer("Вже на роботі!")
         return
     user_status[user_id] = {'active': True, 'username': username, 'workload': workload}
-    save_data()  # Зберігаємо статус
+    save_user_status_to_db(user_id, user_status[user_id])  # Зберігаємо в БД
     await update.callback_query.answer("✅ Check-in!")
     # ВИДАЛЯЄМО ПОВІДОМЛЕННЯ З ВИБОРОМ ЗАВАНТАЖЕНОСТІ
     try: 
@@ -215,7 +319,7 @@ async def do_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE, media_i
     if workload:
         msg += f"{workload} {WORKLOAD[workload]}\n"
     msg += "\n💪 Продуктивної роботи!"
-    media = get_media(user_id)
+    media = get_media()  # Спільна бібліотека
     if media['checkin']:
         await send_media(context.bot, chat_id, media['checkin'][media_idx], msg)
     else:
@@ -229,11 +333,11 @@ async def do_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE, media_
         await update.callback_query.answer("Спочатку check-in!")
         return
     user_status[user_id]['active'] = False
-    save_data()  # Зберігаємо статус
+    save_user_status_to_db(user_id, user_status[user_id])  # Зберігаємо в БД
     await update.callback_query.answer("✅ Check-out!")
     # НЕ ВИДАЛЯЄМО ПОВІДОМЛЕННЯ З МЕДІА
     msg = f"🚪 {username} закінчив день!\n\n👏 Чудова робота!"
-    media = get_media(user_id)
+    media = get_media()  # Спільна бібліотека
     if media['checkout']:
         await send_media(context.bot, chat_id, media['checkout'][media_idx], msg)
     else:
@@ -256,17 +360,19 @@ async def send_media(bot, chat_id, item, text):
 
 async def team(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    if not user_status:
+    # Завантажуємо актуальні статуси з БД
+    all_statuses = get_all_user_statuses()
+    if not all_statuses:
         msg = "📊 Немає даних"
     else:
         online = []
-        for d in user_status.values():
+        for d in all_statuses.values():
             if d['active']:
                 if d.get('workload'):
                     online.append(f"{d['workload']} {d['username']} - {WORKLOAD[d['workload']]}")
                 else:
                     online.append(f"✅ {d['username']}")
-        offline = [f"⭕ {d['username']}" for d in user_status.values() if not d['active']]
+        offline = [f"⭕ {d['username']}" for d in all_statuses.values() if not d['active']]
         msg = "👥 Команда:\n\n"
         if online: msg += "🟢 На роботі:\n" + "\n".join(online) + "\n\n"
         if offline: msg += "🔴 Не на роботі:\n" + "\n".join(offline)
@@ -298,8 +404,7 @@ async def start_add_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ADDING_CHECKOUT_MEDIA
 
 async def receive_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    media = get_media(user_id)
+    media = get_media()  # Спільна бібліотека
     if update.message.text:
         media['checkin'].append({'type': 'text', 'content': update.message.text})
         await update.message.reply_text(f'✅ Додано! Всього: {len(media["checkin"])}')
@@ -312,12 +417,11 @@ async def receive_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif update.message.video:
         media['checkin'].append({'type': 'video', 'content': update.message.video.file_id})
         await update.message.reply_text(f'✅ Додано! Всього: {len(media["checkin"])}')
-    save_data()  # Зберігаємо після кожного додавання
+    save_shared_media_to_db(media)  # Зберігаємо спільну бібліотеку в БД
     return ADDING_CHECKIN_MEDIA
 
 async def receive_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    media = get_media(user_id)
+    media = get_media()  # Спільна бібліотека
     if update.message.text:
         media['checkout'].append({'type': 'text', 'content': update.message.text})
         await update.message.reply_text(f'✅ Додано! Всього: {len(media["checkout"])}')
@@ -330,7 +434,7 @@ async def receive_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif update.message.video:
         media['checkout'].append({'type': 'video', 'content': update.message.video.file_id})
         await update.message.reply_text(f'✅ Додано! Всього: {len(media["checkout"])}')
-    save_data()  # Зберігаємо після кожного додавання
+    save_shared_media_to_db(media)  # Зберігаємо спільну бібліотеку в БД
     return ADDING_CHECKOUT_MEDIA
 
 async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -365,16 +469,18 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'settings':
         await settings(update, context)
     elif data == 'clear_checkin':
-        get_media(update.effective_user.id)['checkin'] = []
-        save_data()  # Зберігаємо після очищення
+        media = get_media()
+        media['checkin'] = []
+        save_shared_media_to_db(media)  # Зберігаємо спільну бібліотеку в БД
         await update.callback_query.answer("🗑 Очищено!")
     elif data == 'clear_checkout':
-        get_media(update.effective_user.id)['checkout'] = []
-        save_data()  # Зберігаємо після очищення
+        media = get_media()
+        media['checkout'] = []
+        save_shared_media_to_db(media)  # Зберігаємо спільну бібліотеку в БД
         await update.callback_query.answer("🗑 Очищено!")
     elif data == 'view_lib':
-        media = get_media(update.effective_user.id)
-        msg = f'📚 Бібліотека:\n\n✅ Check-in: {len(media["checkin"])}\n🚪 Check-out: {len(media["checkout"])}'
+        media = get_media()
+        msg = f'📚 Спільна бібліотека:\n\n✅ Check-in: {len(media["checkin"])}\n🚪 Check-out: {len(media["checkout"])}'
         await update.callback_query.answer()
         await context.bot.send_message(chat_id=update.effective_chat.id, text=msg)
     elif data == 'back':
@@ -393,9 +499,18 @@ def main():
         print("❌ BOT_TOKEN не знайдено!")
         return
     
-    # Завантажуємо збережені дані
-    load_data()
-    print(f"📂 Завантажено даних користувачів: {len(user_media)}")
+    # Ініціалізуємо базу даних
+    init_db()
+    
+    # Завантажуємо спільну бібліотеку медіа
+    global shared_media
+    shared_media = get_shared_media_from_db()
+    print(f"📚 Завантажено медіа: Check-in={len(shared_media['checkin'])}, Check-out={len(shared_media['checkout'])}")
+    
+    # Завантажуємо статуси в пам'ять для швидкого доступу
+    global user_status
+    user_status = get_all_user_statuses()
+    print(f"📊 Завантажено статусів: {len(user_status)}")
     
     Thread(target=run_http, daemon=True).start()
     app = Application.builder().token(TOKEN).build()
