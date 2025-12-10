@@ -185,22 +185,22 @@ def get_media(user_id=None):
         shared_media = get_shared_media_from_db()
     return shared_media
 
+async def delete_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Автоматично видаляти всі команди бота"""
+    try:
+        await update.message.delete()
+    except:
+        pass
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    try: 
-        await update.message.delete()
-    except: 
-        pass
     keyboard = [[InlineKeyboardButton("✅ Check-in", callback_data='checkin')], [InlineKeyboardButton("🚪 Check-out", callback_data='checkout')], [InlineKeyboardButton("👥 Команда", callback_data='team')], [InlineKeyboardButton("🎨 Налаштування", callback_data='settings')]]
     await context.bot.send_message(chat_id=chat_id, text='👋 Бот для відмітки часу', reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     media = get_media()  # Спільна бібліотека
-    try: 
-        await update.message.delete()
-    except: 
-        pass
+    
     if not media['checkin']:
         await context.bot.send_message(chat_id=chat_id, text='📚 Бібліотека check-in порожня! Додай медіа через /start → 🎨 Налаштування')
         return
@@ -220,10 +220,7 @@ async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def checkout_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     media = get_media()  # Спільна бібліотека
-    try: 
-        await update.message.delete()
-    except: 
-        pass
+    
     if not media['checkout']:
         await context.bot.send_message(chat_id=chat_id, text='📚 Бібліотека check-out порожня! Додай медіа через /start → 🎨 Налаштування')
         return
@@ -450,7 +447,11 @@ async def do_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE, media_
     user_status[user_id]['active'] = False
     save_user_status_to_db(user_id, user_status[user_id])  # Зберігаємо в БД
     await update.callback_query.answer("✅ Check-out!")
-    # НЕ ВИДАЛЯЄМО ПОВІДОМЛЕННЯ З МЕДІА
+    # ВИДАЛЯЄМО ПОВІДОМЛЕННЯ З ВИБОРОМ МЕДІА
+    try: 
+        await update.callback_query.message.delete()
+    except: 
+        pass
     msg = f"🚪 {username} закінчив день!\n\n👏 Чудова робота!"
     media = get_media()  # Спільна бібліотека
     if media['checkout']:
@@ -710,6 +711,10 @@ def main():
         ])
     
     app.post_init = post_init
+    
+    # ВАЖЛИВО: Додаємо обробник видалення команд ПЕРШИМ (найвищий пріоритет)
+    app.add_handler(MessageHandler(filters.COMMAND, delete_commands), group=-1)
+    
     conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(start_add_checkin, pattern='^add_checkin$'), 
