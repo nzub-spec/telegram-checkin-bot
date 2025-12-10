@@ -211,7 +211,10 @@ async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text = item['content'][:30] + '...' if len(item['content']) > 30 else item['content']
             keyboard.append([InlineKeyboardButton(f"{emoji} {text}", callback_data=f'ci_{i}')])
         else:
-            keyboard.append([InlineKeyboardButton(f"{emoji} Медіа #{i+1}", callback_data=f'ci_{i}')])
+            # Показуємо назву якщо є, інакше "Медіа #N"
+            name = item.get('name', '') or f"Медіа #{i+1}"
+            display_name = name[:30] + '...' if len(name) > 30 else name
+            keyboard.append([InlineKeyboardButton(f"{emoji} {display_name}", callback_data=f'ci_{i}')])
     await context.bot.send_message(chat_id=chat_id, text='📚 Обери Check-in:', reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def checkout_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -231,7 +234,10 @@ async def checkout_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text = item['content'][:30] + '...' if len(item['content']) > 30 else item['content']
             keyboard.append([InlineKeyboardButton(f"{emoji} {text}", callback_data=f'co_{i}')])
         else:
-            keyboard.append([InlineKeyboardButton(f"{emoji} Медіа #{i+1}", callback_data=f'co_{i}')])
+            # Показуємо назву якщо є, інакше "Медіа #N"
+            name = item.get('name', '') or f"Медіа #{i+1}"
+            display_name = name[:30] + '...' if len(name) > 30 else name
+            keyboard.append([InlineKeyboardButton(f"{emoji} {display_name}", callback_data=f'co_{i}')])
     await context.bot.send_message(chat_id=chat_id, text='📚 Обери Check-out:', reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -264,7 +270,10 @@ async def show_checkin_library(update: Update, context: ContextTypes.DEFAULT_TYP
             text = item['content'][:30] + '...' if len(item['content']) > 30 else item['content']
             keyboard.append([InlineKeyboardButton(f"{emoji} {text}", callback_data=f'ci_{i}')])
         else:
-            keyboard.append([InlineKeyboardButton(f"{emoji} Медіа #{i+1}", callback_data=f'ci_{i}')])
+            # Показуємо назву якщо є, інакше "Медіа #N"
+            name = item.get('name', '') or f"Медіа #{i+1}"
+            display_name = name[:30] + '...' if len(name) > 30 else name
+            keyboard.append([InlineKeyboardButton(f"{emoji} {display_name}", callback_data=f'ci_{i}')])
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data='checkin')])
     await context.bot.send_message(chat_id=chat_id, text='📚 Обери Check-in:', reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -286,7 +295,10 @@ async def show_checkout_library(update: Update, context: ContextTypes.DEFAULT_TY
             text = item['content'][:30] + '...' if len(item['content']) > 30 else item['content']
             keyboard.append([InlineKeyboardButton(f"{emoji} {text}", callback_data=f'co_{i}')])
         else:
-            keyboard.append([InlineKeyboardButton(f"{emoji} Медіа #{i+1}", callback_data=f'co_{i}')])
+            # Показуємо назву якщо є, інакше "Медіа #N"
+            name = item.get('name', '') or f"Медіа #{i+1}"
+            display_name = name[:30] + '...' if len(name) > 30 else name
+            keyboard.append([InlineKeyboardButton(f"{emoji} {display_name}", callback_data=f'co_{i}')])
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data='back')])
     await context.bot.send_message(chat_id=chat_id, text='📚 Обери Check-out:', reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -390,7 +402,7 @@ async def start_add_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.message.delete()
     except: 
         pass
-    await context.bot.send_message(chat_id=chat_id, text='📸 Надішли медіа:\n• 💬 Текст\n• 🖼 Фото\n• 🎬 Гіфку\n• 🎥 Відео\n\n/done - готово, /cancel - скасувати')
+    await context.bot.send_message(chat_id=chat_id, text='📸 Надішли медіа:\n• 💬 Текст\n• 🖼 Фото (+ підпис як назва)\n• 🎬 Гіфку (+ підпис як назва)\n• 🎥 Відео (+ підпис як назва)\n\n/done - готово, /cancel - скасувати')
     return ADDING_CHECKIN_MEDIA
 
 async def start_add_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -400,40 +412,44 @@ async def start_add_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.callback_query.message.delete()
     except: 
         pass
-    await context.bot.send_message(chat_id=chat_id, text='📸 Надішли медіа:\n• 💬 Текст\n• 🖼 Фото\n• 🎬 Гіфку\n• 🎥 Відео\n\n/done - готово, /cancel - скасувати')
+    await context.bot.send_message(chat_id=chat_id, text='📸 Надішли медіа:\n• 💬 Текст\n• 🖼 Фото (+ підпис як назва)\n• 🎬 Гіфку (+ підпис як назва)\n• 🎥 Відео (+ підпис як назва)\n\n/done - готово, /cancel - скасувати')
     return ADDING_CHECKOUT_MEDIA
 
 async def receive_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     media = get_media()  # Спільна бібліотека
+    caption = update.message.caption or ""  # Отримуємо підпис якщо є
+    
     if update.message.text:
-        media['checkin'].append({'type': 'text', 'content': update.message.text})
+        media['checkin'].append({'type': 'text', 'content': update.message.text, 'name': ''})
         await update.message.reply_text(f'✅ Додано! Всього: {len(media["checkin"])}')
     elif update.message.photo:
-        media['checkin'].append({'type': 'photo', 'content': update.message.photo[-1].file_id})
-        await update.message.reply_text(f'✅ Додано! Всього: {len(media["checkin"])}')
+        media['checkin'].append({'type': 'photo', 'content': update.message.photo[-1].file_id, 'name': caption})
+        await update.message.reply_text(f'✅ Додано{":" + caption if caption else ""}! Всього: {len(media["checkin"])}')
     elif update.message.animation:
-        media['checkin'].append({'type': 'animation', 'content': update.message.animation.file_id})
-        await update.message.reply_text(f'✅ Додано! Всього: {len(media["checkin"])}')
+        media['checkin'].append({'type': 'animation', 'content': update.message.animation.file_id, 'name': caption})
+        await update.message.reply_text(f'✅ Додано{":" + caption if caption else ""}! Всього: {len(media["checkin"])}')
     elif update.message.video:
-        media['checkin'].append({'type': 'video', 'content': update.message.video.file_id})
-        await update.message.reply_text(f'✅ Додано! Всього: {len(media["checkin"])}')
+        media['checkin'].append({'type': 'video', 'content': update.message.video.file_id, 'name': caption})
+        await update.message.reply_text(f'✅ Додано{":" + caption if caption else ""}! Всього: {len(media["checkin"])}')
     save_shared_media_to_db(media)  # Зберігаємо спільну бібліотеку в БД
     return ADDING_CHECKIN_MEDIA
 
 async def receive_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     media = get_media()  # Спільна бібліотека
+    caption = update.message.caption or ""  # Отримуємо підпис якщо є
+    
     if update.message.text:
-        media['checkout'].append({'type': 'text', 'content': update.message.text})
+        media['checkout'].append({'type': 'text', 'content': update.message.text, 'name': ''})
         await update.message.reply_text(f'✅ Додано! Всього: {len(media["checkout"])}')
     elif update.message.photo:
-        media['checkout'].append({'type': 'photo', 'content': update.message.photo[-1].file_id})
-        await update.message.reply_text(f'✅ Додано! Всього: {len(media["checkout"])}')
+        media['checkout'].append({'type': 'photo', 'content': update.message.photo[-1].file_id, 'name': caption})
+        await update.message.reply_text(f'✅ Додано{":" + caption if caption else ""}! Всього: {len(media["checkout"])}')
     elif update.message.animation:
-        media['checkout'].append({'type': 'animation', 'content': update.message.animation.file_id})
-        await update.message.reply_text(f'✅ Додано! Всього: {len(media["checkout"])}')
+        media['checkout'].append({'type': 'animation', 'content': update.message.animation.file_id, 'name': caption})
+        await update.message.reply_text(f'✅ Додано{":" + caption if caption else ""}! Всього: {len(media["checkout"])}')
     elif update.message.video:
-        media['checkout'].append({'type': 'video', 'content': update.message.video.file_id})
-        await update.message.reply_text(f'✅ Додано! Всього: {len(media["checkout"])}')
+        media['checkout'].append({'type': 'video', 'content': update.message.video.file_id, 'name': caption})
+        await update.message.reply_text(f'✅ Додано{":" + caption if caption else ""}! Всього: {len(media["checkout"])}')
     save_shared_media_to_db(media)  # Зберігаємо спільну бібліотеку в БД
     return ADDING_CHECKOUT_MEDIA
 
