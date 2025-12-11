@@ -427,7 +427,7 @@ async def do_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE, media_i
         await update.callback_query.message.delete()
     except: 
         pass
-    msg = f"✅ {username} почав день!\n"
+    msg = f"✅ {username} розпочинає день!\n"
     if workload:
         msg += f"{workload} {WORKLOAD[workload]}\n"
     msg += "\n💪 Продуктивної роботи!"
