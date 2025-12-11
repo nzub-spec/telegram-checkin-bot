@@ -6,6 +6,8 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters, ConversationHandler
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from datetime import datetime, time
+import asyncio
 
 ADDING_CHECKIN_MEDIA, ADDING_CHECKOUT_MEDIA, NAMING_CHECKIN_MEDIA, NAMING_CHECKOUT_MEDIA = range(4)
 
@@ -176,6 +178,51 @@ def get_all_user_statuses():
 user_status = {}
 shared_media = {'checkin': [], 'checkout': []}  # Спільна бібліотека для всіх
 WORKLOAD = {'🟢': 'Потрібні задачі', '🟡': 'Середня завантаженість', '🔴': 'Завантаженість до пенсії'}
+
+async def reset_all_statuses():
+    """Скинути всі статуси користувачів"""
+    global user_status
+    conn = get_db_connection()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        # Скидаємо всі active статуси на FALSE
+        cur.execute('UPDATE user_status SET active = FALSE')
+        conn.commit()
+        cur.close()
+        conn.close()
+        # Оновлюємо в пам'яті
+        for user_id in user_status:
+            user_status[user_id]['active'] = False
+        print(f"🌙 Опівночі скинуто статуси всіх користувачів ({len(user_status)} осіб)")
+    except Exception as e:
+        print(f"❌ Помилка скидання статусів: {e}")
+        if conn:
+            conn.close()
+
+async def schedule_midnight_reset(app):
+    """Щоденне скидання статусів о півночі"""
+    while True:
+        now = datetime.now()
+        # Розраховуємо час до наступної півночі
+        midnight = datetime.combine(now.date(), time(0, 0, 0))
+        if now.time() >= time(0, 0, 0):
+            # Якщо вже після півночі, беремо наступну добу
+            from datetime import timedelta
+            midnight = midnight + timedelta(days=1)
+        
+        seconds_until_midnight = (midnight - now).total_seconds()
+        print(f"⏰ Наступне скидання статусів через {seconds_until_midnight/3600:.1f} годин")
+        
+        # Чекаємо до півночі
+        await asyncio.sleep(seconds_until_midnight)
+        
+        # Скидаємо статуси
+        await reset_all_statuses()
+        
+        # Чекаємо 61 секунду щоб не запуститись двічі в одну хвилину
+        await asyncio.sleep(61)
 
 def get_media(user_id=None):
     """Отримати СПІЛЬНУ бібліотеку медіа (user_id не використовується, але залишаємо для сумісності)"""
@@ -427,7 +474,7 @@ async def do_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE, media_i
         await update.callback_query.message.delete()
     except: 
         pass
-    msg = f"✅ {username} розпочинає день!\n"
+    msg = f"✅ {username} почав день!\n"
     if workload:
         msg += f"{workload} {WORKLOAD[workload]}\n"
     msg += "\n💪 Продуктивної роботи!"
@@ -452,7 +499,7 @@ async def do_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE, media_
         await update.callback_query.message.delete()
     except: 
         pass
-    msg = f"🚪 {username} завершує робочий день!\n\n👏 Good job!"
+    msg = f"🚪 {username} закінчив день!\n\n👏 Чудова робота!"
     media = get_media()  # Спільна бібліотека
     if media['checkout']:
         await send_media(context.bot, chat_id, media['checkout'][media_idx], msg)
@@ -709,6 +756,8 @@ def main():
             BotCommand("checkin", "✅ Check-in"),
             BotCommand("checkout", "🚪 Check-out"),
         ])
+        # Запускаємо планувальник скидання статусів о півночі
+        asyncio.create_task(schedule_midnight_reset(application))
     
     app.post_init = post_init
     
