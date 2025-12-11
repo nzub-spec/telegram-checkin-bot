@@ -452,7 +452,7 @@ async def do_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE, media_
         await update.callback_query.message.delete()
     except: 
         pass
-    msg = f"🚪 {username} закінчив день!\n\n👏 Чудова робота!"
+    msg = f"🚪 {username} завершує робочий день!\n\n👏 Good job!"
     media = get_media()  # Спільна бібліотека
     if media['checkout']:
         await send_media(context.bot, chat_id, media['checkout'][media_idx], msg)
