@@ -205,7 +205,7 @@ async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=chat_id, text='📚 Бібліотека check-in порожня! Додай медіа через /start → 🎨 Налаштування')
         return
     keyboard = []
-    for i, item in enumerate(media['checkin'][:10]):
+    for i, item in enumerate(media['checkin']):  # Показуємо ВСІ медіа
         emoji = {'text': '💬', 'photo': '🖼', 'animation': '🎬', 'video': '🎥'}.get(item['type'], '📄')
         if item['type'] == 'text':
             text = item['content'][:30] + '...' if len(item['content']) > 30 else item['content']
@@ -225,7 +225,7 @@ async def checkout_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=chat_id, text='📚 Бібліотека check-out порожня! Додай медіа через /start → 🎨 Налаштування')
         return
     keyboard = []
-    for i, item in enumerate(media['checkout'][:10]):
+    for i, item in enumerate(media['checkout']):  # Показуємо ВСІ медіа
         emoji = {'text': '💬', 'photo': '🖼', 'animation': '🎬', 'video': '🎥'}.get(item['type'], '📄')
         if item['type'] == 'text':
             text = item['content'][:30] + '...' if len(item['content']) > 30 else item['content']
@@ -268,7 +268,7 @@ async def show_checkin_library(update: Update, context: ContextTypes.DEFAULT_TYP
         await context.bot.send_message(chat_id=chat_id, text='📚 Бібліотека порожня!')
         return
     keyboard = []
-    for i, item in enumerate(media['checkin'][:10]):
+    for i, item in enumerate(media['checkin']):  # Показуємо ВСІ медіа
         emoji = {'text': '💬', 'photo': '🖼', 'animation': '🎬', 'video': '🎥'}.get(item['type'], '📄')
         if item['type'] == 'text':
             text = item['content'][:30] + '...' if len(item['content']) > 30 else item['content']
